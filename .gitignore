@@ -1,0 +1,9 @@
+/.idea
+/.local
+/.cache
+/.vscode
+/.vagrant
+.DS_Store
+*.swp
+/mutagen.yml
+/mutagen.yml.lock

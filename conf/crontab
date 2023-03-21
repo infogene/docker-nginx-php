@@ -1,0 +1,4 @@
+#
+## Example : Cron Jobs
+
+#* * * * * cd /application && echo "Cron Jobs Ran "$(date) >> /var/log/cron.log

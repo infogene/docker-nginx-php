@@ -1,0 +1,89 @@
+#!/bin/sh
+
+#set -e
+
+umask 0002
+
+EXEC_COMMAND=$@
+echo "###################################################################################"
+echo "Command entrypoint : $0 $@\n"
+
+if [ "${EXEC_COMMAND}" = "" ] ; then
+    EXEC_COMMAND="--mode-dev"
+fi
+
+#
+## Run acl adjustment
+chmod -R 775 /application && chown -R :www-data /application
+
+#
+## Run App in CLI mode : command "--cli"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--cli)"; then
+  echo "Running in cli mode"
+
+  ## Run cli command
+  EXECLI=$(echo "${EXEC_COMMAND}" | sed -e s/--cli=// -e s/--cli//)
+  exec $(echo "${EXECLI}")
+  exit 0
+fi
+
+#
+## Run App in cron mode : command "--mode-cron"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-cron)"; then
+  echo "Running application in cron mode"
+
+  ## Run bootstrap application : composer, database update ... etc
+  sudo -u www-data make -C /application bootstrap
+  crontab /var/spool/cron/crontabs/*
+  crontab -l
+  exec $(echo "/usr/sbin/cron -f")
+  exit 0
+fi
+
+
+#
+## Run App in dev mode : command "--mode-dev"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-dev)"; then
+  echo "Running application in development  mode"
+
+  ## Run bootstrap application : composer, database update ... etc
+  echo " - Bootstrap application ..."
+  sudo -u www-data make -C /application bootstrap
+
+  ## Enable xdebug
+  echo " - Enable xdebug ..."
+  docker-php-ext-enable xdebug > /dev/null
+
+  ## Start nginx server & output logs to std out
+  echo " - Start nginx ..."
+  /etc/init.d/nginx start && tail -F /var/log/nginx/* &
+
+  ## Start nginx server & output logs to std out
+  echo " - Start php-fpm ..."
+  exec 'php-fpm' '-F'
+fi
+
+#
+## Run App in prod mode : command "--mode-prod"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-prod)"; then
+  echo "Running application in production mode"
+
+  ## Run bootstrap application : composer, database update ... etc
+  echo " - Bootstrap application ..."
+  sudo -u www-data make -C /application bootstrap-prod
+
+  ## Start nginx server
+  echo " - Start nginx ..."
+  /etc/init.d/nginx start
+
+  ## Start nginx server & output logs to std out
+  echo " - Start php-fpm ..."
+  exec 'php-fpm' '-F'
+fi
+
+#
+## Fallback exec CMD: If no option matches
+if echo "${EXEC_COMMAND}" | grep -Eq ".*"; then
+  echo "Running EXEC CMD : ${EXEC_COMMAND}"
+  exec $(echo "${EXEC_COMMAND}")
+fi

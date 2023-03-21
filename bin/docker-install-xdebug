@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+pecl install xdebug-3.2.0 && \
+pecl clear-cache && \
+docker-php-ext-enable xdebug
