@@ -39,14 +39,14 @@ RUN curl -sSKL -O https://download.libsodium.org/libsodium/releases/libsodium-1.
 #
 ## Install php ext
 RUN docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/include/ && \
-        docker-php-ext-configure zip && \
-        docker-php-ext-configure sodium --with-sodium && \
-        docker-php-ext-install -j$(nproc) xsl xml simplexml intl pdo_mysql zip bcmath gd soap sockets sodium && \
-        pecl install apcu-5.1.22 && \
-        pecl install redis-5.3.7 && \
-        pecl install xdebug-3.2.0 && \
-        pecl clear-cache && \
-        docker-php-ext-enable apcu opcache redis
+    docker-php-ext-configure zip && \
+    docker-php-ext-configure sodium --with-sodium && \
+    docker-php-ext-install -j$(nproc) bcmath intl pdo_mysql simplexml soap sockets sodium xml xsl zip && \
+    pecl install apcu-5.1.22 && \
+    pecl install redis-5.3.7 && \
+    pecl install xdebug-3.2.0 && \
+    pecl clear-cache && \
+    docker-php-ext-enable apcu opcache redis
 
 #
 ## Install composer
@@ -65,13 +65,12 @@ RUN chmod +x /usr/local/bin/*
 
 #
 ## Install newrelic
-#ARG NEW_RELIC_AGENT_VERSION='10.7.0.319'
-ARG NEW_RELIC_AGENT_VERSION=''
+ARG NEW_RELIC_AGENT_VERSION='10.7.0.319'
 ARG NEW_RELIC_LICENSE_KEY=''
 ARG NEW_RELIC_APPNAME=''
 ARG NEW_RELIC_DAEMON_ADDRESS=''
 
-RUN /usr/local/bin/docker-install-newrelic
+RUN docker-install-newrelic
 
 #
 ## Configure globals
@@ -114,15 +113,7 @@ ARG GROUP_ID
 
 RUN docker-php-ext-enable xdebug
 
-RUN if [ ${USER_ID:-0} -ne 0 ] && [ ${GROUP_ID:-0} -ne 0 ]; then \
-    userdel -f www-data &&\
-    if getent group www-data ; then groupdel www-data; fi &&\
-    groupadd -g ${GROUP_ID} www-data &&\
-    useradd -l -u ${USER_ID} -g ${GROUP_ID} -m -d /var/www www-data &&\
-    install -d -m 0775 -o www-data -g www-data /var/www &&\
-    chown --changes --silent --no-dereference --recursive \
-          --from=33:33 ${USER_ID}:${GROUP_ID} /var/www \
-;fi
+RUN docker-setup-dev-user
 
 CMD ["--mode-dev"]
 

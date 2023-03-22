@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+#
+## Run acl adjustment
+chmod -R 775 /application && chown -R :www-data /application
