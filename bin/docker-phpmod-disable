@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+PHP_MOD=$1
+PHP_MOD_INIFILE=''
+
+if [ ! -z "${PHP_MOD}" ]; then
+  PHP_MOD_INIFILE=$(php --ini | grep -E "${PHP_MOD}" | sed -e s/\.ini\,/\.ini/)
+
+  if [ ! -z "${PHP_MOD_INIFILE}" ]; then
+     sed -i -e s/^[[:space:]]*extension[[:space:]]*=/\;extension=/ ${PHP_MOD_INIFILE}
+  fi
+
+fi
