@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+
+PHP_MODS=$@
+docker-php-ext-enable $@
