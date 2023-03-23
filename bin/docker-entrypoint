@@ -5,23 +5,16 @@ set -e
 umask 0002
 
 EXEC_COMMAND=$@
-echo "###################################################################################"
-echo "Entrypoint : $0 $@\n"
 
-if [ "${EXEC_COMMAND}" = "" ] ; then
-    EXEC_COMMAND="--mode-prod"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-dev|--mode-prod|--cli)"; then
+echo "###################################################################################"
+echo "Entrypoint : $0 $(echo $@ | sed 's/^\(.\{25\}\).*/\1\.\.\./')\n"
 fi
 
 ## Run permissions flush at startup
 if echo "${APP_BOOT_PERMS_FLUSH}" | grep -Eq "^(1|true)$"; then
 echo "  - Adjust permissions ..."
 docker-permissions-flush
-fi
-
-## Run bootstrap application : composer, database update ... etc
-if echo "${APP_BOOT_CMD}" | grep -Eq ".+"; then
-echo "  - Bootstrap application ..."
-/bin/sh -cl -- "${APP_BOOT_CMD}"
 fi
 
 ## Enable xdebug
@@ -34,6 +27,12 @@ fi
 if [ "${APP_BOOT_PHP_EXT_ENABLED}" != "" ]; then
 echo "  - Enable php extensions (${APP_BOOT_PHP_EXT_ENABLED}) ..."
 docker-php-ext-enable ${APP_BOOT_PHP_EXT_ENABLED} > /dev/null
+fi
+
+## Run bootstrap application : composer, database update ... etc
+if echo "${APP_BOOT_CMD}" | grep -Eq ".+"; then
+echo "  - Bootstrap application ..."
+docker-exec-cmd ${APP_BOOT_CMD} > /dev/null
 fi
 
 #
@@ -108,9 +107,4 @@ fi
 
 #
 ## Fallback exec CMD: If no option matches
-if echo "${EXEC_COMMAND}" | grep -Eq ".+"; then
-  echo "  - Running EXEC CMD : ${EXEC_COMMAND}"
-
-  echo ""
-  exec $(echo "${EXEC_COMMAND}")
-fi
+exec "$@"
