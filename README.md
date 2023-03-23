@@ -30,7 +30,7 @@ docker run -d --name my-webapp -p 8080:80 -v$PWD:/application ghcr.io/infogene/n
 ```dockerfile
 FROM ghcr.io/infogene/nginx-php:latest
 
-COPY COPY --chown=www-data:www-data ./ $APP_DIR
+COPY --chown=www-data:www-data ./ $APP_DIR
 ```
 
 ---
@@ -80,5 +80,12 @@ docker run --name my-webapp -v$PWD:/application ghcr.io/infogene/nginx-php:lates
 > `APP_BOOT_PHP_EXT_ENABLED=<list of php modules>` : if provided, the list of php modules will be enabled
 
 ```shell
-docker run --name my-webapp -v$PWD:/application ghcr.io/infogene/nginx-php:latest ls -l
+docker run -d --name my-webapp \
+              -p"8080:80" \
+              -v"$PWD:/application" \
+              -v"$PWD/certs/main.key.pem:/etc/nginx/ssl/certs/main.key.pem" \
+              -v"$PWD/certs/main.crt.pem:/etc/nginx/ssl/certs/main.crt.pem" \
+              -e"APP_BOOT_PERMS_FLUSH=true" \
+              -e"APP_BOOT_PHP_EXT_ENABLED=xdebug newrelic" \
+              ghcr.io/infogene/nginx-php:latest
 ```

@@ -77,10 +77,8 @@ RUN docker-install-newrelic
 ARG APP_DIR='/application'
 
 RUN mkdir -p /var/www && \
-    chown -R www-data /var/www && \
-    mkdir -p $APP_DIR && \
-    chown -R www-data:www-data $APP_DIR && \
-    chown -R :www-data /var/spool/cron/crontabs/www-data && \
+    chown -R www-data:www-data /var/www && \
+    chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
     touch /var/log/cron.log && \
     chown -R :www-data /var/log/cron.log && \
     chmod +x /usr/local/bin/* && \
