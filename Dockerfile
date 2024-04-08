@@ -1,4 +1,4 @@
-ARG PHP_VERSION='8.2'
+ARG PHP_VERSION='8.3'
 ARG APP_ENV='prod'
 
 FROM php:${PHP_VERSION}-fpm as base
@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ## Install packages
 RUN apt update -yqq && \
     apt install -yqq \
-        apt-utils apt-transport-https ca-certificates build-essential rsync netcat iputils-ping \
+        apt-utils apt-transport-https ca-certificates build-essential rsync netcat-openbsd net-tools iputils-ping \
         sudo make gnupg g++ zip vim nano curl wget git openssl nginx cron \
         libssl-dev libfreetype6-dev libjpeg62-turbo-dev libmcrypt-dev libpng-dev libxslt1-dev libzip-dev icu-devtools && \
         rm -rf /var/lib/apt/lists/*
@@ -31,10 +31,15 @@ RUN openssl req -x509 -nodes -newkey rsa:4096  \
 
 #
 ## Install libsodium
-RUN curl -sSKL -O https://download.libsodium.org/libsodium/releases/libsodium-1.0.18-stable.tar.gz && \
+RUN curl -sSL https://download.libsodium.org/libsodium/releases/libsodium-1.0.18-stable.tar.gz -o libsodium-1.0.18-stable.tar.gz && \
     tar xfvz libsodium-1.0.18-stable.tar.gz  && \
     cd libsodium-stable && \
     ./configure && make && make check && make install
+
+#
+## Docker php ext installer
+RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
+    chmod +x /usr/local/bin/install-php-extensions
 
 #
 ## Install php ext
@@ -44,7 +49,7 @@ RUN docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/i
     docker-php-ext-install -j$(nproc) bcmath intl pdo_mysql simplexml soap sockets sodium xml xsl zip && \
     pecl install apcu-5.1.22 && \
     pecl install redis-5.3.7 && \
-    pecl install xdebug-3.2.0 && \
+    pecl install xdebug-3.3.1 && \
     pecl clear-cache && \
     docker-php-ext-enable apcu opcache redis
 
