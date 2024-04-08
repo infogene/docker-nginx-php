@@ -30,40 +30,35 @@ RUN openssl req -x509 -nodes -newkey rsa:4096  \
     ln -sf /etc/ssl/certs/main.crt.pem /etc/nginx/ssl/certs/main.crt.pem
 
 #
-## Install libsodium
-RUN curl -sSL https://download.libsodium.org/libsodium/releases/libsodium-1.0.18-stable.tar.gz -o libsodium-1.0.18-stable.tar.gz && \
-    tar xfvz libsodium-1.0.18-stable.tar.gz  && \
-    cd libsodium-stable && \
-    ./configure && make && make check && make install
-
-#
 ## Docker php ext installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
     chmod +x /usr/local/bin/install-php-extensions
 
 #
-## Install php ext
-RUN docker-php-ext-configure gd --with-freetype=/usr/include/ --with-jpeg=/usr/include/ && \
-    docker-php-ext-configure zip && \
-    docker-php-ext-configure sodium --with-sodium && \
-    docker-php-ext-install -j$(nproc) bcmath intl pdo_mysql simplexml soap sockets sodium xml xsl zip && \
-    pecl install apcu-5.1.22 && \
-    pecl install redis-5.3.7 && \
-    pecl install xdebug-3.3.1 && \
-    pecl clear-cache && \
-    docker-php-ext-enable apcu opcache redis
-
-#
-## Install composer
-RUN curl -o composer.phar -sSL https://getcomposer.org/download/2.5.5/composer.phar && \
-    mv composer.phar /usr/local/bin/composer && \
-    chmod +x /usr/local/bin/composer*
+## Install php ext : Better install with https://github.com/mlocati/docker-php-extension-installer
+RUN IPE_GD_WITHOUTAVIF=1 \
+    install-php-extensions  apcu-stable \
+                            bcmath-stable \
+                            gd-stable \
+                            intl-stable \
+                            opcache-stable \
+                            pdo_mysql-stable \
+                            redis-stable \
+                            simplexml-stable \
+                            soap-stable \
+                            sockets-stable \
+                            xml-stable \
+                            xsl-stable \
+                            zip-stable && \
+    IPE_DONT_ENABLE=1 \
+    install-php-extensions  xdebug-stable && \
+    install-php-extensions  @composer
 
 #
 ## Copy bin & conf
 COPY ./bin/* /usr/local/bin/
 COPY ./conf/nginx.vhost.conf /etc/nginx/conf.d/default.conf
-COPY ./conf/php-custom.ini /usr/local/etc/php/conf.d/php-custom.ini
+COPY ./conf/php-custom.ini /usr/local/etc/php/conf.d/php.ini
 COPY ./conf/crontab /var/spool/cron/crontabs/www-data
 
 RUN chmod +x /usr/local/bin/*
