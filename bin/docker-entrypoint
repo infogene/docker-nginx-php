@@ -6,21 +6,13 @@ umask 0002
 
 EXEC_COMMAND=$@
 
-if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-dev|--mode-prod|--cli)"; then
-echo "###################################################################################"
+echo "#####################################################################"
 echo "Entrypoint : $0 $(echo $@ | sed 's/^\(.\{25\}\).*/\1\.\.\./')\n"
-fi
 
 ## Run permissions flush at startup
 if echo "${APP_BOOT_PERMS_FLUSH}" | grep -Eq "^(1|true)$"; then
 echo "  - Adjust permissions ..."
 docker-permissions-flush
-fi
-
-## Enable xdebug
-if echo "${APP_BOOT_PHP_XDEBUG_ENABLED}" | grep -Eq "^(1|true)$"; then
-echo "  - Enable xdebug ..."
-docker-php-ext-enable xdebug > /dev/null
 fi
 
 ## Enable php extensions at startup
@@ -39,7 +31,7 @@ fi
 ## Run App in prod mode : command "--mode-prod"
 if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-prod)"; then
   echo "  - Running application in production mode"
-  
+
   ## Start nginx server
   echo "  - Start nginx ..."
   /etc/init.d/nginx start
@@ -56,14 +48,8 @@ fi
 if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-dev)"; then
   echo "  - Running application in development  mode"
 
-  ## Run permissions flush by default in --mode-dev, unless APP_BOOT_PERMS_FLUSH=0
-  if [ "${APP_BOOT_PERMS_FLUSH}" = "" ] || [ "$(echo "${APP_BOOT_PERMS_FLUSH}" | grep -E "^(1|true)$")" != "" ]; then
-  echo "  - Adjust permissions ..."
-  docker-permissions-flush
-  fi
-
-  ## Enable xdebug by default in --mode-dev, unless APP_BOOT_PHP_XDEBUG_ENABLED=0
-  if [ "${APP_BOOT_PHP_XDEBUG_ENABLED}" = "" ] || [ "$(echo "${APP_BOOT_PHP_XDEBUG_ENABLED}" | grep -E "^(1|true)$")" != "" ]; then
+  ## Enable xdebug by default in --mode-dev, unless APP_BOOT_PHP_XDEBUG_ENABLED=xdebug
+  if ! echo $(php -m) | grep -Eq "(xdebug)"; then
   echo "  - Enable xdebug ..."
   docker-php-ext-enable xdebug > /dev/null
   fi
