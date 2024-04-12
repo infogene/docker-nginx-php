@@ -6,13 +6,21 @@ umask 0002
 
 EXEC_COMMAND=$@
 
-echo "#####################################################################"
+if echo "${EXEC_COMMAND}" | grep -Eq "^(--mode-dev|--mode-prod|--cli)"; then
+echo "###################################################################################"
 echo "Entrypoint : $0 $(echo $@ | sed 's/^\(.\{25\}\).*/\1\.\.\./')\n"
+fi
 
 ## Run permissions flush at startup
 if echo "${APP_BOOT_PERMS_FLUSH}" | grep -Eq "^(1|true)$"; then
 echo "  - Adjust permissions ..."
 docker-permissions-flush
+fi
+
+## Enable xdebug
+if echo "${APP_BOOT_PHP_XDEBUG_ENABLED}" | grep -Eq "^(1|true)$"; then
+echo "  - Enable xdebug ..."
+docker-php-ext-enable xdebug > /dev/null
 fi
 
 ## Enable php extensions at startup

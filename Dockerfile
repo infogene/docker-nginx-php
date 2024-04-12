@@ -1,7 +1,8 @@
 ARG PHP_VERSION='8.1'
+ARG DEB_VERSION='bullseye'
 ARG APP_ENV='prod'
 
-FROM php:${PHP_VERSION}-fpm as base
+FROM php:${PHP_VERSION}-fpm-${DEB_VERSION} as base
 
 LABEL application.mode='production'
 LABEL maintainer='mZammouri <mohamed.zammouri@infogene.fr>'
