@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+#
+## Run CMD as www-data user
+exec sudo -E -H -u www-data "$@"
