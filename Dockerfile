@@ -11,64 +11,66 @@ ARG APP_DIR='/application'
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+WORKDIR ${APP_DIR}
+
 # Install packages
-RUN apt update -yqq && \
-    apt install -yqq sudo make curl wget zip vim nano git openssl nginx cron \
-#    libssl-dev libfreetype6-dev libjpeg62-turbo-dev libmcrypt-dev libpng-dev libxslt1-dev libzip-dev icu-devtools \
-    && \
+RUN apt update --yes -q && \
+    apt install --no-install-recommends --yes -q  sudo make curl wget zip nano git openssl nginx cron bash && \
+    apt-get autoremove -yq && \
+    apt-get autoclean -yq && \
     rm -rf /var/lib/apt/lists/*
 
-## Generate certs
-RUN openssl req -x509 -nodes -newkey rsa:4096  \
-    -keyout /etc/ssl/private/main.key.pem  \
-    -out /etc/ssl/certs/main.crt.pem  \
-    -sha256 -days 365 -subj '/CN=localhost' && \
-    mkdir -p /etc/nginx/ssl/certs/ && \
-    ln -sf /etc/ssl/private/main.key.pem /etc/nginx/ssl/certs/main.key.pem && \
-    ln -sf /etc/ssl/certs/main.crt.pem /etc/nginx/ssl/certs/main.crt.pem
-
-## Install Symfony binary
-RUN wget https://get.symfony.com/cli/installer -O - | bash && \
-    mv /root/.symfony5/bin/symfony /usr/local/bin/symfony
-
-## Docker php ext installer
+## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
-    chmod +x /usr/local/bin/install-php-extensions
-
-## Install php ext : Better install with https://github.com/mlocati/docker-php-extension-installer
-RUN install-php-extensions  opcache-stable \
+    chmod +x /usr/local/bin/install-php-extensions && \
+    install-php-extensions  opcache-stable \
                             redis-stable \
                             intl-stable \
                             pdo_pgsql-stable \
-                            pdo_mysql-stable && \
+                            pdo_mysql-stable  \
+                            zip-stable \
+                            http-stable && \
     IPE_DONT_ENABLE=1 \
     install-php-extensions  xdebug-stable && \
     install-php-extensions  @composer
 
-## Copy bin & conf
-COPY ./bin/* /usr/local/bin/
-COPY ./conf/nginx.vhost.conf /etc/nginx/conf.d/default.conf
-COPY ./conf/php.ini /usr/local/etc/php/conf.d/php.ini
-COPY ./conf/crontab /var/spool/cron/crontabs/www-data
+### Install Symfony binary, node + yarn
+#RUN wget https://get.symfony.com/cli/installer -O - | bash && \
+#    mv /root/.symfony5/bin/symfony /usr/local/bin/symfony && \
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | sh - >/dev/null 2>&1 && \
+    curl -sSL https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - >/dev/null 2>&1 && \
+    echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list && \
+    apt-get update --yes -q && \
+    apt-get install --no-install-recommends --yes -q nodejs yarn && \
+    apt-get autoremove -yq && \
+    apt-get autoclean -yq && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN chmod +x /usr/local/bin/*
+## Copy App
+COPY ./ /usr/local/share/application-src
 
-RUN mkdir -p /var/www && \
+RUN cp /usr/local/share/application-src/bin/* /usr/local/bin/ && \
+    cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/conf.d/default.conf && \
+    cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
+    cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
+    cp -rpf /usr/local/share/application-src/src/* ${APP_DIR} && \
+    chmod +x /usr/local/bin/* && \
+    mkdir -p /var/www && \
+    touch /var/log/cron.log && \
+    chown -R www-data:www-data /application && \
     chown -R www-data:www-data /var/www && \
     chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
-    touch /var/log/cron.log && \
     chown -R :www-data /var/log/cron.log && \
-    chmod +x /usr/local/bin/* && \
     rm /etc/nginx/sites-*/* && \
     echo 'alias ll="ls -hal"'     >>  /etc/bash.bashrc && \
     echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> /etc/bash.bashrc && \
-    echo 'umask 0002' >> /etc/bash.bashrc
+    echo 'umask 0002' >> /etc/bash.bashrc && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /var/www/.cache/* && \
+    rm -rf /var/www/.composer/* && \
+    rm -rf /var/cache/*
 
-COPY --chown=www-data:www-data ./src ${APP_DIR}
-
-WORKDIR ${APP_DIR}
-
-EXPOSE 80 443
+EXPOSE 80
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 
