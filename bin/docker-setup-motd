@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+mkdir -p /etc/update-motd.d/
+rm /etc/motd
+rm -rf /etc/update-motd.d/*
+
+## /etc/motd
+cat > /etc/motd <<EOF
+#!/bin/bash
+
+docker-motd-sysinfo
+
+EOF
+
+chmod +x /etc/motd

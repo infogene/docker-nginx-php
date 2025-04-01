@@ -1,0 +1,72 @@
+ARG PHP_VERSION='8.4'
+ARG DEB_VERSION='alpine'
+ARG APP_ENV='prod'
+
+FROM php:${PHP_VERSION}-fpm-${DEB_VERSION}
+
+LABEL application.mode='production'
+LABEL maintainer='mZammouri <mohamed.zammouri@infogene.fr>'
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USER_ID=1000
+ENV GROUP_ID=1000
+ENV ETC_BASHRC='/etc/bash/bashrc'
+ENV HOME_WWW='/home/www-data'
+ENV APP_DIR='/application'
+ENV FRONTEND_APP_DIR='/application/frontend'
+ENV APP_NAME='APP'
+
+WORKDIR $APP_DIR
+
+# Install packages
+RUN apk update && \
+    apk add --update --no-cache sudo make curl wget zip nano git openssl nginx bash figlet
+
+## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
+RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
+    chmod +x /usr/local/bin/install-php-extensions && \
+    install-php-extensions  opcache-stable \
+                            redis-stable \
+                            intl-stable \
+                            pdo_pgsql-stable \
+                            pdo_mysql-stable  \
+                            zip-stable \
+                            http-stable && \
+    IPE_DONT_ENABLE=1 \
+    install-php-extensions  xdebug-stable && \
+    install-php-extensions  @composer
+
+### Install Symfony binary, node + yarn
+RUN curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.alpine.sh' | sudo -E bash  && \
+    apk add --update --no-cache symfony-cli nodejs yarn
+
+## Copy App
+COPY ./ /usr/local/share/application-src
+COPY ./bin/* /usr/local/bin/
+
+RUN chmod +x /usr/local/bin/* && \
+    docker-setup-motd && \
+    docker-setup-www-user && \
+    cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/http.d/default.conf && \
+    cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
+    cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
+    cp -rpf /usr/local/share/application-src/src/* ${APP_DIR} && \
+    mkdir -p /var/www && \
+    chown -R www-data:www-data /var/www && \
+    chown -R www-data:www-data /application && \
+    touch /var/log/cron.log && \
+    chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
+    chown -R :www-data /var/log/cron.log && \
+    echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
+    echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> ${ETC_BASHRC} && \
+    echo 'umask 0000' >> ${ETC_BASHRC} && \
+    echo '. /etc/motd' >> ${ETC_BASHRC} && \
+    rm -rf ${HOME_WWW}/.cache/* && \
+    rm -rf ${HOME_WWW}/.composer/* && \
+    rm -rf /var/cache/*
+
+EXPOSE 80
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
+
+CMD ["--start-backend", "--mode-prod"]
