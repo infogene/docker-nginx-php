@@ -158,8 +158,8 @@ fi
 if echo "${PARAM_BOOT_CMD}" | grep -Eq ".+"; then
   echo "  - Bootstrap application ..."
   echo "  -   Startup CMD : ${PARAM_BOOT_CMD}"
-  docker-exec-www-data ${PARAM_BOOT_CMD} > /dev/null
-#  docker-exec-www-data ${PARAM_BOOT_CMD}
+#  docker-exec-www-data ${PARAM_BOOT_CMD} > /dev/null
+  docker-exec-www-data ${PARAM_BOOT_CMD}
 fi
 
 ## Run App in CLI mode : command "--cli"
