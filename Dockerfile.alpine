@@ -25,20 +25,25 @@ RUN apk update && \
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
     chmod +x /usr/local/bin/install-php-extensions && \
-    install-php-extensions  opcache-stable \
-                            redis-stable \
-                            intl-stable \
-                            pdo_pgsql-stable \
-                            pdo_mysql-stable  \
-                            zip-stable \
-                            http-stable && \
+    install-php-extensions \
+        apcu \
+        excimer \
+        opcache \
+        redis \
+        intl \
+        zip \
+        http \
+        pdo_pgsql \
+        pdo_mysql && \
     IPE_DONT_ENABLE=1 \
-    install-php-extensions  xdebug-stable && \
+    install-php-extensions  xdebug && \
     install-php-extensions  @composer
 
-### Install Symfony binary, node + yarn
-RUN curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.alpine.sh' | sudo -E bash  && \
-    apk add --update --no-cache symfony-cli nodejs yarn
+## Install node, npm + yarn
+RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v24.13.0/node-v24.13.0-linux-x64-musl.tar.xz -o /tmp/node-v24.13.0-linux-x64.tar.xz  && \
+    tar -xJf /tmp/node-v24.13.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
+    rm /tmp/node-v24.13.0-linux-x64.tar.xz && \
+    corepack enable && corepack prepare yarn@stable --activate
 
 ## Copy App
 COPY ./ /usr/local/share/application-src
