@@ -43,7 +43,7 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
 RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v24.13.0/node-v24.13.0-linux-x64-musl.tar.xz -o /tmp/node-v24.13.0-linux-x64.tar.xz  && \
     tar -xJf /tmp/node-v24.13.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
     rm /tmp/node-v24.13.0-linux-x64.tar.xz && \
-    corepack enable && corepack prepare yarn@stable --activate
+    npm install --global yarn
 
 ## Copy App
 COPY ./ /usr/local/share/application-src
