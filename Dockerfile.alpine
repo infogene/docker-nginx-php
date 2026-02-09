@@ -62,6 +62,13 @@ RUN chmod +x /usr/local/bin/* && \
     touch /var/log/cron.log && \
     chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
     chown -R :www-data /var/log/cron.log && \
+    mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp /var/lib/nginx/tmp/client_body && \
+    chown -R www-data:www-data /var/lib/nginx && \
+    chown -R www-data:www-data /var/log/nginx && \
+    touch /run/nginx/nginx.pid && \
+    chown -R www-data:www-data /run/nginx && \
+    # #Grant nginx capability to bind privileged ports && \
+    #setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
     echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> ${ETC_BASHRC} && \
     echo 'umask 0000' >> ${ETC_BASHRC} && \
@@ -70,7 +77,9 @@ RUN chmod +x /usr/local/bin/* && \
     rm -rf ${HOME_WWW}/.composer/* && \
     rm -rf /var/cache/*
 
-EXPOSE 80
+EXPOSE 8080 3000
+
+USER www-data
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 
