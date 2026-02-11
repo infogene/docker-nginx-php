@@ -20,7 +20,7 @@ WORKDIR $APP_DIR
 
 # Install packages
 RUN apk update && \
-    apk add --update --no-cache sudo make curl wget zip nano git openssl nginx bash figlet
+    apk add --update --no-cache sudo make curl wget zip nano git openssl nginx bash figlet libcap
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
@@ -33,6 +33,7 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
         intl \
         zip \
         http \
+        pcov \
         pdo_pgsql \
         pdo_mysql && \
     IPE_DONT_ENABLE=1 \
@@ -67,8 +68,9 @@ RUN chmod +x /usr/local/bin/* && \
     chown -R www-data:www-data /var/log/nginx && \
     touch /run/nginx/nginx.pid && \
     chown -R www-data:www-data /run/nginx && \
-    # #Grant nginx capability to bind privileged ports && \
-    #setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
+    sed -i 's/^user nginx;/#user nginx;/' /etc/nginx/nginx.conf || true && \
+    #Grant nginx capability to bind privileged ports && \
+    setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
     echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> ${ETC_BASHRC} && \
     echo 'umask 0000' >> ${ETC_BASHRC} && \
