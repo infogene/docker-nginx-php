@@ -3,4 +3,8 @@ set -e
 
 #
 ## Run CMD as www-data user
-exec sudo -E -H -u www-data "$@"
+if [ "$(id -u)" = "0" ]; then
+    exec sudo -E -H -u www-data "$@"
+else
+    exec "$@"
+fi
