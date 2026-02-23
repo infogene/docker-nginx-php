@@ -103,7 +103,6 @@ parse_params() {
   [[ ${PARAM_MODE_DEV} -eq 1 ]] && PARAM_MODE_PROD=0
   [[ ${PARAM_MODE_DEV} -eq 1 ]] && PARAM_ENABLE_XDEBUG=1
   [[ ${PARAM_MODE_PROD} -eq 1 ]] && PARAM_MODE_DEV=0
-  [[ ${PARAM_MODE_PROD} -eq 1 ]] && PARAM_MODE_DEV=
   [[ ${PARAM_START_CRON} -eq 1 ]] && PARAM_START_ALL=0
   [[ ${PARAM_START_BACKEND} -eq 1 ]] && PARAM_START_ALL=0
   [[ ${PARAM_START_FRONTEND} -eq 1 ]] && PARAM_START_ALL=0
@@ -196,8 +195,8 @@ if [[ ${PARAM_START_BACKEND} -eq 1 ]]; then
   echo "  - Start nginx + php-fpm ..."
   echo ""
 
-  nginx -g 'daemon off;' &
+  docker-exec-www-data nginx -g 'daemon off;' &
 
-  exec 'php-fpm' '-F'
+  docker-exec-www-data php-fpm -F
   exit 0
 fi
