@@ -7,8 +7,8 @@ default: help
 
 ## Run docker build
 build-tag:
-	@test -z $(TARGET_ARGV) || docker build  -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
-	@test -z $(TARGET_ARGV) || docker build  -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
 	@test -z $(TARGET_ARGV) || docker tag ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine ghcr.io/infogene/nginx-php:$(TARGET_ARGV)
 	@test ! -z $(TARGET_ARGV) || docker build -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:latest-debian .
 	@test ! -z $(TARGET_ARGV) || docker build -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:latest-alpine .
