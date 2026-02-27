@@ -20,7 +20,8 @@ WORKDIR $APP_DIR
 
 # Install packages
 RUN apt update --yes -q && \
-    apt install --no-install-recommends --yes -q sudo make curl wget zip nano git openssl nginx cron bash figlet && \
+    apt install --no-install-recommends --yes -q \
+    sudo make curl wget zip nano git openssl nginx cron bash figlet supervisor && \
     apt autoremove -yq && apt autoclean -yq && rm -rf /var/lib/apt/lists/*
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
@@ -55,6 +56,8 @@ COPY ./bin/* /usr/local/bin/
 RUN chmod +x /usr/local/bin/* && \
     docker-setup-motd && \
     docker-setup-www-user && \
+    mkdir -p /etc/supervisor/conf.d && \
+    cp /usr/local/share/application-src/conf/supervisord.conf /etc/supervisor/supervisord.conf && \
     cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/conf.d/default.conf && \
     cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
     cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
@@ -70,7 +73,7 @@ RUN chmod +x /usr/local/bin/* && \
     chown -R www-data:www-data /var/log/nginx && \
     touch /run/nginx.pid && \
     chown www-data:www-data /run/nginx.pid && \
-    sed -i 's/^user nginx;/#user nginx;/' /etc/nginx/nginx.conf || true && \
+    sed -i 's/^user www-data;/#user www-data;/' /etc/nginx/nginx.conf || true && \
     #Grant nginx capability to bind privileged ports && \
     setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \

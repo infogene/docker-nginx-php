@@ -6,6 +6,8 @@ set -Eeuo pipefail
 # Constants
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
 readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+readonly SUPERVISOR_CONF_DIR="/etc/supervisor/conf.d"
+readonly SUPERVISOR_MAIN_CONF="/etc/supervisor/supervisord.conf"
 
 # Color codes (populated by setup_colors)
 declare NOFORMAT RED GREEN ORANGE BLUE PURPLE CYAN YELLOW
@@ -28,7 +30,10 @@ trap cleanup SIGINT SIGTERM ERR EXIT
 #######################################
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
-  # Add cleanup logic here if needed
+  # Gracefully stop supervisor if running
+  if pgrep -x supervisord >/dev/null 2>&1; then
+    supervisorctl shutdown >/dev/null 2>&1 || true
+  fi
 }
 
 #######################################
@@ -78,7 +83,7 @@ usage() {
   cat <<EOF
 Usage: ${SCRIPT_NAME} [OPTIONS] [ARGS...]
 
-Docker entrypoint for PHP/Node.js application with multiple runtime modes.
+Docker entrypoint for PHP/Node.js application with Supervisor-managed services.
 
 OPTIONS:
   -h, --help              Show this help message and exit
@@ -91,10 +96,10 @@ OPTIONS:
   --enable-xdebug         Explicitly enable xdebug
 
   Service Options:
-  --start-cron            Start cron service only
-  --start-backend         Start Nginx + PHP-FPM only
-  --start-frontend        Start frontend server only
-  --start-all             Start both backend and frontend services
+  --start-cron            Enable cron service
+  --start-backend         Enable Nginx + PHP-FPM services
+  --start-frontend        Enable frontend server
+  --start-all             Enable all services (backend + frontend + cron)
 
   Execution Options:
   --boot-cmd COMMAND      Run command during bootstrap (e.g., "php bin/console cache:clear")
@@ -109,10 +114,10 @@ ENVIRONMENT VARIABLES:
   APP_BOOT_CMD            Default boot command
 
 EXAMPLES:
-  # Start in production mode with backend only
+  # Start backend services (nginx + php-fpm)
   ${SCRIPT_NAME} --start-backend --mode-prod
 
-  # Start in dev mode with all services
+  # Start all services
   ${SCRIPT_NAME} --start-all --mode-dev
 
   # Run a CLI command
@@ -120,6 +125,10 @@ EXAMPLES:
 
   # Passthrough mode (run bash)
   ${SCRIPT_NAME} bash
+
+NOTES:
+  All services are managed by Supervisor for robust process management.
+  Logs are automatically directed to stdout/stderr for Docker compatibility.
 
 EOF
   exit 0
@@ -173,6 +182,7 @@ parse_params() {
       --start-all)
         START_BACKEND=1
         START_FRONTEND=1
+        START_CRON=1
         shift
         ;;
       --boot-cmd)
@@ -292,56 +302,186 @@ run_cli_mode() {
 }
 
 #######################################
-# Start cron service
+# Initialize Supervisor configuration
 #######################################
-start_cron() {
-  [[ $START_CRON -eq 0 ]] && return 0
+init_supervisor_config() {
+  msg "${CYAN}  ↳ Initializing Supervisor configuration...${NOFORMAT}"
 
-  msg "${GREEN}  ↳ Starting cron service...${NOFORMAT}"
+  # Create supervisor conf directory if it doesn't exist
+  mkdir -p "$SUPERVISOR_CONF_DIR"
 
-  # Display crontab
-  if crontab -u www-data -l 2>/dev/null; then
-    echo ""
+  # Clear any existing service configurations
+  rm -f "${SUPERVISOR_CONF_DIR}"/*.conf 2>/dev/null || true
+
+  # Generate random password for supervisor (optional)
+  local supervisor_user="admin"
+  local supervisor_pass="${SUPERVISOR_PASSWORD:-$(openssl rand -base64 12)}"
+
+  # Create main supervisord config if it doesn't exist
+  if [[ ! -f "$SUPERVISOR_MAIN_CONF" ]]; then
+    cat > "$SUPERVISOR_MAIN_CONF" <<SUPERVISORD_EOF
+[unix_http_server]
+file=/var/run/supervisor.sock
+chmod=0700
+username=${supervisor_user}
+password=${supervisor_pass}
+
+[supervisord]
+nodaemon=true
+logfile=/dev/null
+logfile_maxbytes=0
+loglevel=info
+pidfile=/var/run/supervisord.pid
+user=root
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///var/run/supervisor.sock
+username=${supervisor_user}
+password=${supervisor_pass}
+
+[include]
+files = /etc/supervisor/conf.d/*.conf
+SUPERVISORD_EOF
   fi
-
-  exec /usr/sbin/crond -f
 }
 
 #######################################
-# Start frontend service
+# Configure Nginx service in Supervisor
 #######################################
-start_frontend() {
+configure_nginx_service() {
+  msg "${CYAN}    ↳ Configuring Nginx service...${NOFORMAT}"
+
+  cat > "${SUPERVISOR_CONF_DIR}/nginx.conf" <<NGINX_EOF
+[program:nginx]
+command=/usr/sbin/nginx -g "daemon off;"
+autostart=true
+autorestart=true
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=10
+user=www-data
+NGINX_EOF
+}
+
+#######################################
+# Configure PHP-FPM service in Supervisor
+#######################################
+configure_phpfpm_service() {
+  msg "${CYAN}    ↳ Configuring PHP-FPM service...${NOFORMAT}"
+
+  cat > "${SUPERVISOR_CONF_DIR}/php-fpm.conf" <<PHPFPM_EOF
+[program:php-fpm]
+command=/usr/local/sbin/php-fpm -F
+autostart=true
+autorestart=true
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=10
+user=root
+PHPFPM_EOF
+}
+
+#######################################
+# Configure Frontend service in Supervisor
+#######################################
+configure_frontend_service() {
   [[ $START_FRONTEND -eq 0 ]] && return 0
 
-  msg "${GREEN}  ↳ Starting frontend server...${NOFORMAT}"
+  msg "${CYAN}    ↳ Configuring Frontend service...${NOFORMAT}"
 
-  if command -v docker-exec-www-data &>/dev/null; then
-    if [[ $START_BACKEND -eq 1 ]]; then
-      # Start in background if backend also starting
-      docker-exec-www-data yarn --cwd frontend "${APP_ENV:-dev}" &
-    else
-      # Start in foreground if only frontend
-      exec docker-exec-www-data yarn --cwd frontend "${APP_ENV:-dev}"
-    fi
-  else
-    die "docker-exec-www-data command not found"
-  fi
+  local frontend_cmd="yarn --cwd /application/frontend ${APP_ENV:-dev}"
+
+  cat > "${SUPERVISOR_CONF_DIR}/frontend.conf" <<FRONTEND_EOF
+[program:frontend]
+command=/bin/bash -c "exec ${frontend_cmd}"
+autostart=true
+autorestart=true
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=20
+user=www-data
+directory=/application/frontend
+environment=NODE_ENV="${APP_ENV:-development}",HOME="/home/www-data"
+FRONTEND_EOF
 }
 
 #######################################
-# Start backend service (Nginx + PHP-FPM)
+# Configure Cron service in Supervisor
 #######################################
-start_backend() {
-  [[ $START_BACKEND -eq 0 ]] && return 0
+configure_cron_service() {
+  [[ $START_CRON -eq 0 ]] && return 0
 
-  msg "${GREEN}  ↳ Starting Nginx + PHP-FPM...${NOFORMAT}"
+  msg "${CYAN}    ↳ Configuring Cron service...${NOFORMAT}"
+
+  # Display current crontab
+  if crontab -u www-data -l 2>/dev/null | grep -v '^#' | grep -v '^$'; then
+    msg "${CYAN}      Active crontab entries loaded${NOFORMAT}"
+  fi
+
+  cat > "${SUPERVISOR_CONF_DIR}/cron.conf" <<CRON_EOF
+[program:cron]
+command=/usr/sbin/cron -f
+autostart=true
+autorestart=true
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=5
+user=root
+CRON_EOF
+}
+
+#######################################
+# Start services with Supervisor
+#######################################
+start_services() {
+  local service_count=0
+
+  msg "${GREEN}  ↳ Starting services with Supervisor...${NOFORMAT}"
+
+  # Configure requested services
+  if [[ $START_BACKEND -eq 1 ]]; then
+    configure_nginx_service
+    configure_phpfpm_service
+    ((service_count += 2))
+  fi
+
+  if [[ $START_CRON -eq 1 ]]; then
+    configure_cron_service
+    ((service_count += 1))
+  fi
+
+  if [[ $START_FRONTEND -eq 1 ]]; then
+    configure_frontend_service
+    ((service_count += 1))
+  fi
+
+  # Check if any services were configured
+  if [[ $service_count -eq 0 ]]; then
+    msg "${YELLOW}⚠ No services configured. Use --help for usage information.${NOFORMAT}"
+    exit 1
+  fi
+
+  msg "${GREEN}  ↳ Configured ${service_count} service(s)${NOFORMAT}"
+  msg "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NOFORMAT}"
   echo ""
 
-  # Start Nginx in background
-  nginx -g 'daemon off;' &
-
-  # Start PHP-FPM in foreground
-  exec php-fpm -F
+  # Start supervisord in foreground
+  exec /usr/bin/supervisord -c "$SUPERVISOR_MAIN_CONF"
 }
 
 #######################################
@@ -352,7 +492,7 @@ main() {
   parse_params "$@"
 
   msg "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NOFORMAT}"
-  msg "${BLUE}  Starting entrypoint...${NOFORMAT}"
+  msg "${BLUE}  Docker Entrypoint${NOFORMAT}"
   msg "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NOFORMAT}"
 
   # Setup phase
@@ -361,15 +501,12 @@ main() {
   setup_prod_mode
   run_boot_command
 
-  # Execution phase
-  run_cli_mode    # Exits if CLI mode
-  start_cron      # Exits if cron mode
-  start_frontend  # May run in background
-  start_backend   # Exits with exec
+  # CLI mode (exits immediately)
+  run_cli_mode
 
-  # If we reach here and nothing started, show warning
-  msg "${YELLOW}⚠ No service started. Use --help for usage information.${NOFORMAT}"
-  exit 1
+  # Service mode (starts supervisor)
+  init_supervisor_config
+  start_services
 }
 
 # Execute main function
