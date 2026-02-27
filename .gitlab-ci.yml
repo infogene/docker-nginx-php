@@ -22,8 +22,8 @@ docker-build:
   # All branches are tagged with $DOCKER_IMAGE_NAME (defaults to commit ref slug)
   # Default branch is also tagged with `latest`
   script:
-    - docker build --pull --build-arg "PHP_VERSION=$(PHP_VERSION)" -f Dockerfile.alpine -t "$DOCKER_IMAGE_NAME-alpine" .
-    - docker build --pull --build-arg "PHP_VERSION=$(PHP_VERSION)" -f Dockerfile.debian -t "$DOCKER_IMAGE_NAME-debian" .
+    - docker build --pull --build-arg "PHP_VERSION=$PHP_VERSION" -f Dockerfile.alpine -t "$DOCKER_IMAGE_NAME-alpine" .
+    - docker build --pull --build-arg "PHP_VERSION=$PHP_VERSION" -f Dockerfile.debian -t "$DOCKER_IMAGE_NAME-debian" .
     - docker tag "$DOCKER_IMAGE_NAME-alpine" "$DOCKER_IMAGE_NAME"
     - docker push "$DOCKER_IMAGE_NAME-alpine"
     - docker push "$DOCKER_IMAGE_NAME-debian"
