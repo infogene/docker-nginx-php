@@ -16,18 +16,31 @@ docker-build:
     - docker:dind
   variables:
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    PHP_VERSION: 8.4
   before_script:
     - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   # All branches are tagged with $DOCKER_IMAGE_NAME (defaults to commit ref slug)
   # Default branch is also tagged with `latest`
   script:
-    - docker build --pull -t "$DOCKER_IMAGE_NAME" .
+    - docker build --pull --build-arg "PHP_VERSION=$(PHP_VERSION)" -f Dockerfile.alpine -t "$DOCKER_IMAGE_NAME-alpine" .
+    - docker build --pull --build-arg "PHP_VERSION=$(PHP_VERSION)" -f Dockerfile.debian -t "$DOCKER_IMAGE_NAME-debian" .
+    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$DOCKER_IMAGE_NAME"
+    - docker push "$DOCKER_IMAGE_NAME-alpine"
+    - docker push "$DOCKER_IMAGE_NAME-debian"
     - docker push "$DOCKER_IMAGE_NAME"
     - |
       if [[ ! -z "$CI_COMMIT_TAG" ]]; then
-        docker tag "$DOCKER_IMAGE_NAME" "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
-        docker tag "$DOCKER_IMAGE_NAME" "$CI_REGISTRY_IMAGE:latest"
-        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
+        docker tag "$DOCKER_IMAGE_NAME-debian" "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine"
+        docker tag "$DOCKER_IMAGE_NAME-debian" "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian"
+        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION"
+        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:latest"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION"
         docker push "$CI_REGISTRY_IMAGE:latest"
       fi
   # Run this job in a branch where a Dockerfile exists
