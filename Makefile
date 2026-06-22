@@ -7,11 +7,11 @@ default: help
 
 ## Run docker build
 build-tag:
-	@test -z $(TARGET_ARGV) || docker build --pull --build-arg "PHP_VERSION=$(TARGET_ARGV)" -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
-	@test -z $(TARGET_ARGV) || docker build --pull --build-arg "PHP_VERSION=$(TARGET_ARGV)" -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
 	@test -z $(TARGET_ARGV) || docker tag ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine ghcr.io/infogene/nginx-php:$(TARGET_ARGV)
-	@test ! -z $(TARGET_ARGV) || docker build --pull -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:latest-debian .
-	@test ! -z $(TARGET_ARGV) || docker build --pull -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:latest-alpine .
+	@test ! -z $(TARGET_ARGV) || docker build --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:latest-debian .
+	@test ! -z $(TARGET_ARGV) || docker build --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:latest-alpine .
 	@test ! -z $(TARGET_ARGV) || docker tag ghcr.io/infogene/nginx-php:latest-alpine ghcr.io/infogene/nginx-php:latest
 .PHONY: build-tag
 
