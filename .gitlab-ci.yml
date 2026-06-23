@@ -43,25 +43,46 @@ docker-build:
         docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian"
         docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION"
         docker push "$CI_REGISTRY_IMAGE:latest"
-      
-        # PUSH TO Github Container Registry
-        echo -n $CI_GHCR_TOKEN | docker login -u $CI_GHCR_USER --password-stdin ghcr.io
-      
-        docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-        docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
-        docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine"
-        docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian"
-        docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION"
-        docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:latest"
-        docker push "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-        docker push "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
-        docker push "$GHCR_IMAGE:$PHP_VERSION-alpine"
-        docker push "$GHCR_IMAGE:$PHP_VERSION-debian"
-        docker push "$GHCR_IMAGE:$PHP_VERSION"
-        docker push "$GHCR_IMAGE:latest"
       fi
   # Run this job in a branch where a Dockerfile exists
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# PUSH TO GitHub Container Registry
+# Mirrors the tagged images built by `docker-build` from the GitLab registry to ghcr.io.
+# Only runs on git tags (releases).
+ghcr-push:
+  image: docker:cli
+  stage: deploy
+  services:
+    - docker:dind
+  needs:
+    - docker-build
+  variables:
+    PHP_VERSION: 8.4
+    DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    GHCR_IMAGE: ghcr.io/infogene/nginx-php
+  before_script:
+    - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+    - echo -n $CI_GHCR_TOKEN | docker login -u $CI_GHCR_USER --password-stdin ghcr.io
+  script:
+    # Pull the images that `docker-build` pushed to the GitLab registry
+    - docker pull "$DOCKER_IMAGE_NAME-alpine"
+    - docker pull "$DOCKER_IMAGE_NAME-debian"
+    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
+    - docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine"
+    - docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian"
+    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION"
+    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:latest"
+    - docker push "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
+    - docker push "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+    - docker push "$GHCR_IMAGE:$PHP_VERSION-alpine"
+    - docker push "$GHCR_IMAGE:$PHP_VERSION-debian"
+    - docker push "$GHCR_IMAGE:$PHP_VERSION"
+    - docker push "$GHCR_IMAGE:latest"
+  # Only mirror to GHCR on git tags (releases)
+  rules:
     - if: $CI_COMMIT_TAG
