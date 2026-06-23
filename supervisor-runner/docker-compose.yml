@@ -10,22 +10,12 @@ services:
       - 8080
     ports:
       - "18080:8080"
-    # Commande minimale : --start-supervisor-cli + un --supervisor-program par service.
-    # nginx et php-fpm sont supervisés SÉPARÉMENT (restart indépendant, pas de wrapper).
-    # Toutes les autres options --supervisor-* ont des défauts (user=www-data, autostart,
-    # autorestart, stop/kill-as-group, logs vers stdout/stderr...) -> surchargeables.
-#    command:
-#      - --start-backend
-#
-#      - --supervisor-program
-#      - php-fpm -F
-#      - --supervisor-program-name
-#      - php-fpm
-#
-#      - --supervisor-program
-#      - nginx -g "daemon off;"
-#      - --supervisor-program-name
-#      - nginx
+    # --start-backend SANS argument -> défaut Nginx + PHP-FPM.
+    # AVEC un argument -> surcharge la commande du backend (ici serveur PHP intégré).
+    # (idem --start-frontend "<cmd>").
+    command:
+      - --start-backend
+      - php -S 0.0.0.0:8080 -t /application/public
 
     # L'image contient déjà /application/public/index.php (phpinfo).
     # Montez votre app ici pour servir votre propre code :

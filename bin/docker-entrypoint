@@ -19,6 +19,8 @@ declare -i START_BACKEND=0
 declare -i START_FRONTEND=0
 declare -i START_SUPERVISOR_CLI=0
 declare -a SUPERVISOR_ARGS=()
+declare BACKEND_CMD=""
+declare FRONTEND_CMD=""
 declare BOOT_CMD="${APP_BOOT_CMD:-}"
 declare CLI_CMD=""
 
@@ -94,9 +96,12 @@ OPTIONS:
 
   Service Options:
   --start-cron            Start cron service only
-  --start-backend         Start Nginx + PHP-FPM only
-  --start-frontend        Start frontend server only
-  --start-all             Start both backend and frontend services
+  --start-backend [CMD]   Start backend. Default: Nginx + PHP-FPM.
+                          Optional CMD overrides it, e.g.
+                          --start-backend "php -S 0.0.0.0:8080 -t /application/public"
+  --start-frontend [CMD]  Start frontend. Default: yarn --cwd frontend <env>.
+                          Optional CMD overrides it.
+  --start-all             Start backend and frontend with their default commands
   --start-supervisor-cli  Generate a supervisord config from --supervisor-* args
                           and run supervisord (see docker-supervisor-cli --help)
 
@@ -173,11 +178,23 @@ parse_params() {
         ;;
       --start-backend)
         START_BACKEND=1
-        shift
+        # Optional command override: consume $2 only if it isn't another option
+        if [[ $# -ge 2 && "$2" != -* ]]; then
+          BACKEND_CMD="$2"
+          shift 2
+        else
+          shift
+        fi
         ;;
       --start-frontend)
         START_FRONTEND=1
-        shift
+        # Optional command override: consume $2 only if it isn't another option
+        if [[ $# -ge 2 && "$2" != -* ]]; then
+          FRONTEND_CMD="$2"
+          shift 2
+        else
+          shift
+        fi
         ;;
       --start-all)
         START_BACKEND=1
@@ -344,8 +361,11 @@ register_supervisor_program() {
 start_frontend() {
   [[ $START_FRONTEND -eq 0 ]] && return 0
 
+  # Default command unless overridden via --start-frontend "<cmd>"
+  local cmd="${FRONTEND_CMD:-yarn --cwd frontend ${APP_ENV:-dev}}"
+
   msg "${GREEN}  ↳ Registering frontend server (Supervisor)...${NOFORMAT}"
-  register_supervisor_program "yarn --cwd frontend ${APP_ENV:-dev}" "frontend"
+  register_supervisor_program "$cmd" "frontend"
 }
 
 #######################################
@@ -371,6 +391,13 @@ start_supervisor_cli() {
 #######################################
 start_backend() {
   [[ $START_BACKEND -eq 0 ]] && return 0
+
+  # Custom command overrides the default Nginx + PHP-FPM pair
+  if [[ -n "$BACKEND_CMD" ]]; then
+    msg "${GREEN}  ↳ Registering backend (custom command) (Supervisor)...${NOFORMAT}"
+    register_supervisor_program "$BACKEND_CMD" "backend"
+    return 0
+  fi
 
   msg "${GREEN}  ↳ Registering Nginx + PHP-FPM (Supervisor)...${NOFORMAT}"
   register_supervisor_program "php-fpm -F" "php-fpm"
