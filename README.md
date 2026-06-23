@@ -1,60 +1,61 @@
 # nginx-php — Docker image for PHP web applications
 
-Image Docker générique pour applications web PHP, basée sur l'image **PHP officielle**
-(`php:*-fpm`) et fournie en variantes **Alpine** et **Debian**.
+A general-purpose Docker image for PHP web applications, built on the **official PHP
+image** (`php:*-fpm`) and shipped in **Alpine** and **Debian** variants.
 
-Maintenue par [Infogene](https://infogene.fr) ·
-Image : [`ghcr.io/infogene/nginx-php`](https://github.com/infogene/docker-nginx-php/pkgs/container/nginx-php)
+Maintained by [Infogene](https://infogene.fr) ·
+Image: [`ghcr.io/infogene/nginx-php`](https://github.com/infogene/docker-nginx-php/pkgs/container/nginx-php)
 
-> À ne pas confondre avec une image `php` officielle. Voir la
-> [page Docker Hub de PHP](https://hub.docker.com/_/php/) pour l'image PHP amont.
+> Not to be confused with an official `php` image. See the
+> [PHP Docker Hub page](https://hub.docker.com/_/php/) for the upstream PHP image.
 
-## Sommaire
+## Table of contents
 
-- [Caractéristiques](#caractéristiques)
-- [Démarrage rapide](#démarrage-rapide)
-- [Utiliser l'image](#utiliser-limage)
-- [Modes de fonctionnement](#modes-de-fonctionnement)
-- [Services : backend, frontend, cron](#services--backend-frontend-cron)
-- [Mode Supervisor générique](#mode-supervisor-générique---start-supervisor-cli)
-- [Variables d'environnement](#variables-denvironnement)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Using the image](#using-the-image)
+- [Run modes](#run-modes)
+- [Services: backend, frontend, cron](#services-backend-frontend-cron)
+- [Generic Supervisor mode](#generic-supervisor-mode---start-supervisor-cli)
+- [Other executions](#other-executions)
+- [Environment variables](#environment-variables)
 - [Ports](#ports)
-- [Personnaliser l'image](#personnaliser-limage)
-- [Exemples](#exemples)
-- [Fonctionnement interne](#fonctionnement-interne)
+- [Customizing the image](#customizing-the-image)
+- [Examples](#examples)
+- [How it works](#how-it-works)
 
-## Caractéristiques
+## Features
 
-- **PHP-FPM + Nginx** prêts à l'emploi, configuration Symfony-friendly.
-- **Variantes Alpine & Debian**, PHP 8.4 (paramétrable via `PHP_VERSION`).
-- **Exécution non-root** (`www-data`, uid/gid 1000) ; Nginx écoute sur le port **8080**.
-- **Supervisor** comme superviseur de processus (PID 1) : redémarrage automatique,
-  arrêt propre, logs vers `stdout`/`stderr`.
-- Extensions PHP courantes préinstallées (`opcache`, `apcu`, `redis`, `intl`, `pdo_*`,
-  `zip`, `xdebug` désactivé par défaut…), **Composer**, **Node 24** + **Yarn**.
-- Entrypoint **piloté par options** : backend / frontend / cron / worker / CLI,
-  commandes surchargeables.
+- **PHP-FPM + Nginx** out of the box, Symfony-friendly configuration.
+- **Alpine & Debian variants**, PHP 8.4 (configurable via `PHP_VERSION`).
+- **Non-root execution** (`www-data`, uid/gid 1000); Nginx listens on port **8080**.
+- **Supervisor** as the process supervisor (PID 1): automatic restart, clean
+  shutdown, logs to `stdout`/`stderr`.
+- Common PHP extensions preinstalled (`opcache`, `apcu`, `redis`, `intl`, `pdo_*`,
+  `zip`, `xdebug` disabled by default…), **Composer**, **Node 24** + **Yarn**.
+- **Option-driven** entrypoint: backend / frontend / cron / worker / CLI, with
+  overridable commands.
 
-## Démarrage rapide
+## Quick start
 
 ```shell
 docker run -d --name my-webapp -p 8080:8080 ghcr.io/infogene/nginx-php:latest
 ```
 
-Ouvrez http://localhost:8080 : la page affiche le `phpinfo()` par défaut (placeholder).
+Open http://localhost:8080: the page shows the default `phpinfo()` (placeholder).
 
-## Utiliser l'image
+## Using the image
 
-### Monter votre application
+### Mount your application
 
-L'application est servie depuis `/application` (`$APP_DIR`), document root `/application/public`.
+The application is served from `/application` (`$APP_DIR`), document root `/application/public`.
 
 ```shell
 docker run -d --name my-webapp -p 8080:8080 -v "$PWD:/application" \
   ghcr.io/infogene/nginx-php:latest
 ```
 
-### Construire votre propre image
+### Build your own image
 
 ```dockerfile
 FROM ghcr.io/infogene/nginx-php:latest
@@ -62,8 +63,8 @@ FROM ghcr.io/infogene/nginx-php:latest
 COPY --chown=www-data:www-data ./ /application
 ```
 
-Vous pouvez ajouter des extensions PHP comme avec l'image officielle, via
-`docker-php-ext-configure` / `docker-php-ext-install` :
+You can add PHP extensions just like with the official image, via
+`docker-php-ext-configure` / `docker-php-ext-install` (or the bundled installer):
 
 ```dockerfile
 FROM ghcr.io/infogene/nginx-php:latest
@@ -71,53 +72,53 @@ FROM ghcr.io/infogene/nginx-php:latest
 RUN install-php-extensions gd
 ```
 
-## Modes de fonctionnement
+## Run modes
 
-| Option | Effet |
+| Option | Effect |
 |---|---|
-| `--mode-prod` | Mode production (**défaut**) |
-| `--mode-dev` | Mode développement : `APP_ENV=dev`, **xdebug activé** |
-| `--enable-xdebug` | Active explicitement xdebug |
+| `--mode-prod` | Production mode (**default**) |
+| `--mode-dev` | Development mode: `APP_ENV=dev`, **xdebug enabled** |
+| `--enable-xdebug` | Explicitly enable xdebug |
 
-Sans option, le mode est déduit de la variable `APP_ENV` (défaut : `prod`).
+Without an option, the mode is derived from the `APP_ENV` variable (default: `prod`).
 
 ```shell
 docker run -d -p 8080:8080 -v "$PWD:/application" \
   ghcr.io/infogene/nginx-php:latest --mode-dev
 ```
 
-## Services : backend, frontend, cron
+## Services: backend, frontend, cron
 
-L'entrypoint démarre les services demandés sous **Supervisor**. La commande par
-défaut de l'image est `--start-backend --mode-prod`.
+The entrypoint starts the requested services under **Supervisor**. The image's
+default command is `--start-backend --mode-prod`.
 
-| Option | Démarre | Commande par défaut |
+| Option | Starts | Default command |
 |---|---|---|
 | `--start-backend [CMD]` | Nginx + PHP-FPM | `php-fpm -F` + `nginx -g "daemon off;"` |
-| `--start-frontend [CMD]` | Serveur frontend | `yarn --cwd frontend <env>` |
-| `--start-all` | Backend **et** frontend | (leurs défauts) |
-| `--start-cron` | Démon cron | crontab de `www-data` |
+| `--start-frontend [CMD]` | Frontend server | `yarn --cwd frontend <env>` |
+| `--start-all` | Backend **and** frontend | (their defaults) |
+| `--start-cron` | Cron daemon | `www-data` crontab |
 
-`--start-backend` et `--start-frontend` acceptent une **commande optionnelle** qui
-**surcharge** le démarrage par défaut :
+`--start-backend` and `--start-frontend` accept an **optional command** that
+**overrides** the default startup:
 
 ```shell
-# Backend par défaut (Nginx + PHP-FPM)
+# Default backend (Nginx + PHP-FPM)
 docker run -d -p 8080:8080 -v "$PWD:/application" \
   ghcr.io/infogene/nginx-php:latest --start-backend
 
-# Backend surchargé : serveur web intégré de PHP
+# Overridden backend: PHP built-in web server
 docker run -d -p 8080:8080 -v "$PWD:/application" \
   ghcr.io/infogene/nginx-php:latest \
   --start-backend "php -S 0.0.0.0:8080 -t /application/public"
 ```
 
-Backend et frontend sont enregistrés comme des programmes Supervisor **distincts** :
-chacun est redémarré indépendamment.
+Backend and frontend are registered as **separate** Supervisor programs: each is
+restarted independently.
 
 ### Cron
 
-Fournissez votre crontab et lancez le mode cron (Nginx / PHP-FPM ne démarrent pas) :
+Provide your crontab and start cron mode (Nginx / PHP-FPM do not start):
 
 ```shell
 docker run -d --name my-cron -v "$PWD:/application" \
@@ -125,13 +126,13 @@ docker run -d --name my-cron -v "$PWD:/application" \
   ghcr.io/infogene/nginx-php:latest --start-cron
 ```
 
-## Mode Supervisor générique (`--start-supervisor-cli`)
+## Generic Supervisor mode (`--start-supervisor-cli`)
 
-Pour superviser **n'importe quelle** commande sans fournir de fichier
-`supervisord.conf`, utilisez `--start-supervisor-cli` suivi d'options `--supervisor-*`.
-La configuration Supervisor est générée au démarrage.
+To supervise **any** command without providing a `supervisord.conf`, use
+`--start-supervisor-cli` followed by `--supervisor-*` options. The Supervisor
+configuration is generated at startup.
 
-`--supervisor-program` est **répétable** (une section `[program]` par occurrence).
+`--supervisor-program` is **repeatable** (one `[program]` section per occurrence).
 
 ```yaml
 command:
@@ -145,9 +146,9 @@ command:
   - "10"
 ```
 
-| Option | Directive générée | Défaut |
+| Option | Generated directive | Default |
 |---|---|---|
-| `--supervisor-program "<cmd>"` | `command=<cmd>` | *(≥ 1 requis)* |
+| `--supervisor-program "<cmd>"` | `command=<cmd>` | *(≥ 1 required)* |
 | `--supervisor-program-name NAME` | `[program:NAME]` | `app`, `app2`, … |
 | `--supervisor-autostart BOOL` | `autostart` | `true` |
 | `--supervisor-autorestart BOOL` | `autorestart` | `true` |
@@ -158,78 +159,78 @@ command:
 | `--supervisor-stdout-logfile PATH` | `stdout_logfile` | `/dev/stdout` |
 | `--supervisor-stderr-logfile PATH` | `stderr_logfile` | `/dev/stderr` |
 
-**Portée des options** : avant le 1er `--supervisor-program` → défaut **global** (tous
-les programmes) ; après un `--supervisor-program` → surcharge **ce** programme.
+**Option scope**: before the 1st `--supervisor-program` → **global** default (all
+programs); after a `--supervisor-program` → overrides **that** program.
 
-**Extensible** : toute option `--supervisor-<a>-<b> VALUE` devient `a_b=VALUE`
-(ex. `--supervisor-numprocs 4` → `numprocs=4`).
+**Extensible**: any `--supervisor-<a>-<b> VALUE` option becomes `a_b=VALUE`
+(e.g. `--supervisor-numprocs 4` → `numprocs=4`).
 
-> `user` doit valoir l'utilisateur courant du conteneur (`www-data` par défaut) ;
-> pour superviser un autre utilisateur, lancez le conteneur en root (`--user 0`).
+> `user` must match the container's current user (`www-data` by default); to
+> supervise a different user, run the container as root (`--user 0`).
 
-## Autres exécutions
+## Other executions
 
 ```shell
-# Commande unique puis sortie (aucun service)
+# Single command then exit (no services)
 docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest --cli "php -v"
 
-# Commande au démarrage, avant les services
+# Command at startup, before services
 docker run -d -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest \
   --boot-cmd "php bin/console cache:clear" --start-backend
 
-# Passthrough : tout argument positionnel est exécuté tel quel
+# Passthrough: any positional argument is executed as-is
 docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 ```
 
-## Variables d'environnement
+## Environment variables
 
-| Variable | Effet |
+| Variable | Effect |
 |---|---|
-| `APP_ENV` | `dev` / `prod` (détermine le mode si aucune option `--mode-*`) |
-| `APP_BOOT_CMD` | Commande exécutée au démarrage (équivaut à `--boot-cmd`) |
-| `APP_BOOT_PERMS_FLUSH` | Si `true`, ajuste les permissions de `/application` (775, groupe `www-data`) |
-| `APP_BOOT_PHP_XDEBUG_ENABLED` | Si `true`, active xdebug |
-| `APP_BOOT_PHP_EXT_ENABLED` | Liste de modules PHP à activer (séparés par des espaces) |
-| `USER_ID` / `GROUP_ID` | uid/gid de `www-data` (remap au build, défaut 1000) |
+| `APP_ENV` | `dev` / `prod` (determines the mode when no `--mode-*` option) |
+| `APP_BOOT_CMD` | Command run at startup (equivalent to `--boot-cmd`) |
+| `APP_BOOT_PERMS_FLUSH` | If `true`, adjusts `/application` permissions (775, group `www-data`) |
+| `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug |
+| `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable |
+| `USER_ID` / `GROUP_ID` | `www-data` uid/gid (remapped at build time, default 1000) |
 
 ## Ports
 
 | Port | Service |
 |---|---|
 | `8080` | Nginx (HTTP) |
-| `3000` | Serveur frontend (dev) |
-| `9000` | PHP-FPM (interne) |
+| `3000` | Frontend server (dev) |
+| `9000` | PHP-FPM (internal) |
 
-## Personnaliser l'image
+## Customizing the image
 
 ```shell
-make build-tag 8.4   # build local des variantes 8.4-alpine / 8.4-debian
-make build-tag       # variantes `latest`
-make push-tag 8.4    # push vers ghcr.io/infogene/nginx-php
+make build-tag 8.4   # local build of the 8.4-alpine / 8.4-debian variants
+make build-tag       # `latest` variants
+make push-tag 8.4    # push to ghcr.io/infogene/nginx-php
 ```
 
-## Exemples
+## Examples
 
-Des fichiers Docker Compose prêts à l'emploi sont fournis dans
-[`docs/examples/`](docs/examples/) :
+Ready-to-run Docker Compose files are provided in
+[`docs/examples/`](docs/examples/):
 
-- [Backend Nginx + PHP-FPM](docs/examples/backend-nginx-phpfpm.yml)
-- [Backend avec commande surchargée](docs/examples/backend-custom-command.yml)
-- [Tous les services](docs/examples/all-services.yml)
-- [Plusieurs programmes Supervisor](docs/examples/supervisor-multi-programs.yml)
-- [Worker en arrière-plan](docs/examples/supervisor-worker.yml)
+- [Nginx + PHP-FPM backend](docs/examples/backend-nginx-phpfpm.yml)
+- [Backend with overridden command](docs/examples/backend-custom-command.yml)
+- [All services](docs/examples/all-services.yml)
+- [Multiple Supervisor programs](docs/examples/supervisor-multi-programs.yml)
+- [Background worker](docs/examples/supervisor-worker.yml)
 
-## Fonctionnement interne
+## How it works
 
-- **Entrypoint** : `bin/docker-entrypoint` analyse les options, prépare le mode
-  (dev/prod, xdebug), exécute l'éventuel `--boot-cmd`, puis enregistre les services
-  demandés et lance un **unique `supervisord`** (via `bin/docker-supervisor-cli`).
-- **`docker-supervisor-cli`** génère le `supervisord.conf` à partir des options
-  `--supervisor-*` et exécute `supervisord`. Il est utilisé en interne par
-  `--start-backend` / `--start-frontend`, et directement via `--start-supervisor-cli`.
-- **Non-root** : l'image tourne en `www-data` ; Nginx reçoit la capability
-  `cap_net_bind_service` mais le vhost écoute sur `8080`.
-- **Variantes** : `Dockerfile.alpine` (défaut, `Dockerfile` y est lié) et
+- **Entrypoint**: `bin/docker-entrypoint` parses the options, prepares the mode
+  (dev/prod, xdebug), runs any `--boot-cmd`, then registers the requested services
+  and launches a **single `supervisord`** (via `bin/docker-supervisor-cli`).
+- **`docker-supervisor-cli`** generates `supervisord.conf` from the `--supervisor-*`
+  options and execs `supervisord`. It is used internally by `--start-backend` /
+  `--start-frontend`, and directly via `--start-supervisor-cli`.
+- **Non-root**: the image runs as `www-data`; Nginx is granted the
+  `cap_net_bind_service` capability but the vhost listens on `8080`.
+- **Variants**: `Dockerfile.alpine` (default, `Dockerfile` is a symlink to it) and
   `Dockerfile.debian`.
 
-Aide complète des options : `docker run --rm ghcr.io/infogene/nginx-php:latest --help`.
+Full option help: `docker run --rm ghcr.io/infogene/nginx-php:latest --help`.
