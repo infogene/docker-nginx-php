@@ -182,6 +182,13 @@ generate_conf() {
   {
     echo "[supervisord]"
     echo "nodaemon=true"
+    # Keep supervisord off the application directory (cwd): each program already
+    # forwards its own stdout/stderr to the container logs, and writing into
+    # /application would break a read-only root filesystem. The pidfile lives in
+    # /tmp (writable / tmpfs-friendly).
+    echo "logfile=/dev/null"
+    echo "logfile_maxbytes=0"
+    echo "pidfile=/tmp/supervisord.pid"
     local i
     for ((i = 0; i <= CUR; i++)); do
       emit_program "$i"

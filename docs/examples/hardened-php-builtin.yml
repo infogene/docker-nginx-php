@@ -1,0 +1,73 @@
+# Maximally-hardened backend using PHP's built-in web server (no Nginx).
+#
+# Because `php -S` carries no file capabilities (unlike the setcap'd nginx),
+# this backend can run under the strictest sandbox: ALL capabilities dropped
+# with NONE added back, no-new-privileges, and a read-only root filesystem with
+# a single writable tmpfs (/tmp). Verified to serve HTTP 200.
+#
+# Trade-off: PHP's built-in server is single-threaded and meant for low-traffic
+# or internal services. For public production traffic prefer the Nginx + PHP-FPM
+# backend (see production-hardened.yml).
+#
+#   docker compose -f hardened-php-builtin.yml up
+#   -> http://localhost:8080
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    command:
+      - --start-backend
+      - php -S 0.0.0.0:8080 -t /application/public
+    ports:
+      - "8080:8080"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # --- Security hardening (maximal) ---------------------------------------
+    # Runs as non-root www-data; no capability is needed at all here.
+    cap_drop:
+      - ALL
+    # No setuid/setgid binary can gain new privileges.
+    security_opt:
+      - no-new-privileges:true
+    # Read-only root filesystem: php -S only needs a writable /tmp
+    # (docker-supervisor-cli writes /tmp/supervisord.conf; PHP also uses /tmp
+    # for sessions and uploads by default).
+    read_only: true
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { mode: 01777 }
+      # Mount your application here (otherwise the image's built-in phpinfo() is
+      # served). Use :ro if your app does not write to its own source tree.
+      # - type: bind
+      #   source: ./
+      #   target: /application
+      #   read_only: true
+
+    # --- Resource limits ----------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 128
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+    # --- Logging ------------------------------------------------------------
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
