@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
 #
-# Génère un supervisord.conf à partir des arguments CLI (--supervisor-*) puis
-# lance supervisord. Appelé par docker-entrypoint via l'option --start-supervisor-cli,
-# mais utilisable aussi seul.
+# Generates a supervisord.conf from CLI arguments (--supervisor-*) and then runs
+# supervisord. Invoked by docker-entrypoint via the --start-supervisor-cli option,
+# but also usable on its own.
 #
-# --supervisor-program est RÉPÉTABLE : chaque occurrence ouvre une nouvelle
-# section [program]. Toutes les autres options --supervisor-* ont une valeur par
-# défaut et sont surchargeables :
-#   * placées AVANT le 1er --supervisor-program -> défaut global (tous les programmes)
-#   * placées APRÈS un --supervisor-program      -> surcharge CE programme uniquement
+# --supervisor-program is REPEATABLE: each occurrence opens a new [program]
+# section. Every other --supervisor-* option has a default value and is overridable:
+#   * placed BEFORE the 1st --supervisor-program -> global default (all programs)
+#   * placed AFTER a --supervisor-program        -> overrides THAT program only
 #
-# Règle de mapping : --supervisor-<a>-<b> VALUE  ->  a_b=VALUE  dans [program]
-#   exceptions :
-#     --supervisor-program        -> command=<VALUE> (ouvre un nouveau programme)
-#     --supervisor-program-name   -> nom du programme courant (défaut: app, app2, app3, ...)
+# Mapping rule: --supervisor-<a>-<b> VALUE  ->  a_b=VALUE  in [program]
+#   exceptions:
+#     --supervisor-program        -> command=<VALUE> (opens a new program)
+#     --supervisor-program-name   -> current program name (default: app, app2, app3, ...)
 
 set -Eeuo pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
-# Chemin par défaut volontairement inscriptible par www-data comme par root.
+# Default path deliberately writable by both www-data and root.
 readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
 
-# --- Valeurs par défaut appliquées à CHAQUE programme (surchargeables) --------
+# --- Default values applied to EVERY program (overridable) -------------------
 declare -A GLOBAL=(
   [autostart]="true"
   [autorestart]="true"
@@ -35,8 +34,8 @@ declare -A GLOBAL=(
   [stderr_logfile_maxbytes]="0"
 )
 
-# Ordre d'écriture des directives connues (lisibilité). Les clés inconnues
-# (nouveaux paramètres) sont écrites ensuite, sans modification de code.
+# Output order for known directives (readability). Unknown keys (new parameters)
+# are written afterwards, with no code change required.
 readonly KEY_ORDER=(
   command autostart autorestart startsecs startretries
   stopsignal stopwaitsecs stopasgroup killasgroup
@@ -45,13 +44,13 @@ readonly KEY_ORDER=(
   stderr_logfile stderr_logfile_maxbytes
 )
 
-# Programmes accumulés
-declare -a PROG_CMD=()    # commande par programme
-declare -a PROG_NAME=()   # nom par programme ("" = défaut)
-declare -i CUR=-1         # index du programme courant (-1 = aucun encore)
+# Accumulated programs
+declare -a PROG_CMD=()    # command per program
+declare -a PROG_NAME=()   # name per program ("" = default)
+declare -i CUR=-1         # index of the current program (-1 = none yet)
 
 die() {
-  echo >&2 "ERREUR: $1"
+  echo >&2 "ERROR: $1"
   exit "${2:-1}"
 }
 
@@ -59,36 +58,36 @@ usage() {
   cat <<EOF
 Usage: ${SCRIPT_NAME} --supervisor-program "<cmd>" [--supervisor-program "<cmd2>" ...] [OPTIONS...]
 
-Génère dynamiquement un supervisord.conf (1 section [program] par --supervisor-program)
-puis lance supervisord.
+Dynamically generates a supervisord.conf (one [program] section per
+--supervisor-program) then runs supervisord.
 
-Obligatoire (répétable):
-  --supervisor-program "<cmd>"     Ouvre une nouvelle section [program]
+Required (repeatable):
+  --supervisor-program "<cmd>"     Opens a new [program] section
 
-Optionnel — défauts appliqués à chaque programme (surchargeables):
-  --supervisor-program-name NAME   Nom du programme courant  (défaut: app, app2, ...)
-  --supervisor-autostart BOOL      autostart                 (défaut: true)
-  --supervisor-autorestart BOOL    autorestart               (défaut: true)
-  --supervisor-startretries N      startretries              (défaut: 3)
-  --supervisor-stopasgroup BOOL    stopasgroup               (défaut: true)
-  --supervisor-killasgroup BOOL    killasgroup               (défaut: true)
-  --supervisor-user USER           user                      (défaut: www-data)
-  --supervisor-stdout-logfile PATH stdout_logfile            (défaut: /dev/stdout)
-  --supervisor-stderr-logfile PATH stderr_logfile            (défaut: /dev/stderr)
+Optional — defaults applied to each program (overridable):
+  --supervisor-program-name NAME   Current program name      (default: app, app2, ...)
+  --supervisor-autostart BOOL      autostart                 (default: true)
+  --supervisor-autorestart BOOL    autorestart               (default: true)
+  --supervisor-startretries N      startretries              (default: 3)
+  --supervisor-stopasgroup BOOL    stopasgroup               (default: true)
+  --supervisor-killasgroup BOOL    killasgroup               (default: true)
+  --supervisor-user USER           user                      (default: www-data)
+  --supervisor-stdout-logfile PATH stdout_logfile            (default: /dev/stdout)
+  --supervisor-stderr-logfile PATH stderr_logfile            (default: /dev/stderr)
 
-Portée des options:
-  * AVANT le 1er --supervisor-program -> défaut global (tous les programmes)
-  * APRÈS un --supervisor-program     -> surcharge CE programme uniquement
+Option scope:
+  * BEFORE the 1st --supervisor-program -> global default (all programs)
+  * AFTER a --supervisor-program        -> overrides THAT program only
 
-Extensible : toute option --supervisor-<a>-<b> VALUE devient « a_b=VALUE ».
-Exemple : --supervisor-stop-signal TERM -> stop_signal=TERM
+Extensible: any --supervisor-<a>-<b> VALUE option becomes "a_b=VALUE".
+Example: --supervisor-stop-signal TERM -> stop_signal=TERM
 
-  -h, --help                       Affiche cette aide
+  -h, --help                       Show this help
 EOF
   exit 0
 }
 
-# Ouvre un nouveau programme initialisé avec les défauts globaux courants.
+# Opens a new program initialized with the current global defaults.
 new_program() {
   CUR=$((CUR + 1))
   PROG_CMD[$CUR]="$1"
@@ -101,8 +100,8 @@ new_program() {
   done
 }
 
-# Applique une directive : au programme courant, ou aux défauts globaux si aucun
-# programme n'a encore été ouvert.
+# Applies a directive: to the current program, or to the global defaults if no
+# program has been opened yet.
 set_directive() {
   local key="$1" val="$2"
   if [[ $CUR -lt 0 ]]; then
@@ -120,34 +119,34 @@ parse_args() {
         usage
         ;;
       --supervisor-program)
-        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
         new_program "$2"
         shift 2
         ;;
       --supervisor-program-name)
-        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
-        [[ $CUR -ge 0 ]] || die "$1 doit suivre un --supervisor-program"
-        [[ "$2" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Nom de programme invalide: $2"
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
+        [[ $CUR -ge 0 ]] || die "$1 must follow a --supervisor-program"
+        [[ "$2" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Invalid program name: $2"
         PROG_NAME[$CUR]="$2"
         shift 2
         ;;
       --supervisor-*)
-        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
-        local key="${1#--supervisor-}"   # ex: stdout-logfile
-        key="${key//-/_}"                # ex: stdout_logfile
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
+        local key="${1#--supervisor-}"   # e.g. stdout-logfile
+        key="${key//-/_}"                # e.g. stdout_logfile
         set_directive "$key" "$2"
         shift 2
         ;;
       *)
-        die "Argument inconnu: $1 (voir --help)"
+        die "Unknown argument: $1 (see --help)"
         ;;
     esac
   done
 
-  [[ $CUR -ge 0 ]] || die "au moins un --supervisor-program est requis (voir --help)"
+  [[ $CUR -ge 0 ]] || die "at least one --supervisor-program is required (see --help)"
 }
 
-# Écrit la section [program] d'index $1. Nameref frais à chaque appel.
+# Writes the [program] section at index $1. Fresh nameref on each call.
 emit_program() {
   local idx="$1"
   local name="${PROG_NAME[$idx]}"
@@ -160,7 +159,7 @@ emit_program() {
   echo "[program:${name}]"
   echo "command=${PROG_CMD[$idx]}"
 
-  # Directives connues, dans l'ordre (on saute "command", déjà écrite)
+  # Known directives, in order (skip "command", already written)
   local emitted=" command "
   local key
   for key in "${KEY_ORDER[@]}"; do
@@ -171,7 +170,7 @@ emit_program() {
     fi
   done
 
-  # Directives supplémentaires non listées dans KEY_ORDER (extensibilité)
+  # Extra directives not listed in KEY_ORDER (extensibility)
   for key in "${!_dir[@]}"; do
     [[ "$emitted" == *" $key "* ]] && continue
     echo "${key}=${_dir[$key]}"
@@ -194,7 +193,7 @@ main() {
   parse_args "$@"
   generate_conf
 
-  echo ">> Configuration Supervisor générée (${SUPERVISORD_CONF}) :"
+  echo ">> Generated Supervisor configuration (${SUPERVISORD_CONF}):"
   echo "----------------------------------------"
   cat "$SUPERVISORD_CONF"
   echo "----------------------------------------"

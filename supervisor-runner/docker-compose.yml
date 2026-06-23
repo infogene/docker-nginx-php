@@ -1,7 +1,7 @@
 services:
   app:
-    # Build de l'image de base du dépôt : elle embarque désormais l'ENTRYPOINT
-    # standard (bin/docker-entrypoint) + le générateur bin/docker-supervisor-cli.
+    # Build the repository's base image: it ships the standard ENTRYPOINT
+    # (bin/docker-entrypoint) + the generator bin/docker-supervisor-cli.
     build:
       context: ..
       dockerfile: Dockerfile.alpine
@@ -10,14 +10,14 @@ services:
       - 8080
     ports:
       - "18080:8080"
-    # --start-backend SANS argument -> défaut Nginx + PHP-FPM.
-    # AVEC un argument -> surcharge la commande du backend (ici serveur PHP intégré).
-    # (idem --start-frontend "<cmd>").
+    # --start-backend WITHOUT an argument -> default Nginx + PHP-FPM.
+    # WITH an argument -> overrides the backend command (here PHP's built-in server).
+    # (same for --start-frontend "<cmd>").
     command:
       - --start-backend
       - php -S 0.0.0.0:8080 -t /application/public
 
-    # L'image contient déjà /application/public/index.php (phpinfo).
-    # Montez votre app ici pour servir votre propre code :
+    # The image already contains /application/public/index.php (phpinfo).
+    # Mount your app here to serve your own code:
     # volumes:
     #   - ./:/application

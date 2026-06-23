@@ -1,17 +1,17 @@
-# Exemples Docker Compose
+# Docker Compose examples
 
-Exemples prêts à l'emploi pour `ghcr.io/infogene/nginx-php`. Chaque fichier est
-autonome : `docker compose -f <fichier>.yml up`.
+Ready-to-run examples for `ghcr.io/infogene/nginx-php`. Each file is
+self-contained: `docker compose -f <file>.yml up`.
 
-| Fichier | Démontre |
+| File | Demonstrates |
 |---|---|
-| [`backend-nginx-phpfpm.yml`](backend-nginx-phpfpm.yml) | Backend par défaut : Nginx + PHP-FPM |
-| [`backend-custom-command.yml`](backend-custom-command.yml) | `--start-backend "<cmd>"` : surcharge de la commande backend |
-| [`all-services.yml`](all-services.yml) | `--start-all` : backend + frontend sous un seul supervisord |
-| [`supervisor-multi-programs.yml`](supervisor-multi-programs.yml) | `--start-supervisor-cli` : plusieurs programmes Supervisor explicites |
-| [`supervisor-worker.yml`](supervisor-worker.yml) | `--start-supervisor-cli` : worker en arrière-plan (Symfony Messenger) |
+| [`backend-nginx-phpfpm.yml`](backend-nginx-phpfpm.yml) | Default backend: Nginx + PHP-FPM |
+| [`backend-custom-command.yml`](backend-custom-command.yml) | `--start-backend "<cmd>"`: overriding the backend command |
+| [`all-services.yml`](all-services.yml) | `--start-all`: backend + frontend under a single supervisord |
+| [`supervisor-multi-programs.yml`](supervisor-multi-programs.yml) | `--start-supervisor-cli`: multiple explicit Supervisor programs |
+| [`supervisor-worker.yml`](supervisor-worker.yml) | `--start-supervisor-cli`: background worker (Symfony Messenger) |
 
-Chaque exemple référence l'image publiée (`image:`). Pour tester depuis les
-sources du dépôt, décommentez le bloc `build:` présent dans chaque fichier.
+Each example references the published image (`image:`). To test against the
+repository sources, uncomment the `build:` block present in each file.
 
-Voir le [README principal](../../README.md) pour la liste complète des options.
+See the [main README](../../README.md) for the full list of options.

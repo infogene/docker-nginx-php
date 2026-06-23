@@ -1,5 +1,5 @@
-# Backend avec commande surchargée : ici le serveur web intégré de PHP au lieu
-# de Nginx + PHP-FPM. Passez la commande en argument de --start-backend.
+# Backend with an overridden command: here PHP's built-in web server instead of
+# Nginx + PHP-FPM. Pass the command as the argument to --start-backend.
 #
 #   docker compose -f backend-custom-command.yml up
 #   -> http://localhost:8080
@@ -14,6 +14,6 @@ services:
     command:
       - --start-backend
       - php -S 0.0.0.0:8080 -t /application/public
-    # Montez votre application (sinon le phpinfo() intégré à l'image est servi) :
+    # Mount your application (otherwise the image's built-in phpinfo() is served):
     # volumes:
     #   - ./:/application

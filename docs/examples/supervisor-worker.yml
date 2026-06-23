@@ -1,8 +1,8 @@
-# Worker / job en arrière-plan (sans serveur web) via --start-supervisor-cli.
-# Exemple : un consumer Symfony Messenger, redémarré automatiquement.
-# Les options placées APRÈS un --supervisor-program surchargent CE programme
-# (ici startretries=10) ; placées avant le 1er programme, elles deviennent des
-# défauts globaux pour tous les programmes.
+# Background worker / job (no web server) via --start-supervisor-cli.
+# Example: a Symfony Messenger consumer, automatically restarted.
+# Options placed AFTER a --supervisor-program override THAT program (here
+# startretries=10); placed before the 1st program, they become global defaults
+# for all programs.
 #
 #   docker compose -f supervisor-worker.yml up
 services:
@@ -20,6 +20,6 @@ services:
       - messenger
       - --supervisor-startretries
       - "10"
-    # Le worker exécute le code de VOTRE application : montez-la ici.
+    # The worker runs YOUR application's code: mount it here.
     volumes:
       - ./:/application

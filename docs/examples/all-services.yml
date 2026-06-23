@@ -1,7 +1,7 @@
-# Backend + frontend ensemble, sous un unique supervisord.
-# --start-all = --start-backend + --start-frontend avec leurs commandes par défaut :
+# Backend + frontend together, under a single supervisord.
+# --start-all = --start-backend + --start-frontend with their default commands:
 #   backend  : Nginx + PHP-FPM
-#   frontend : yarn --cwd frontend <env>   (nécessite un dossier /application/frontend)
+#   frontend : yarn --cwd frontend <env>   (requires a /application/frontend folder)
 #
 #   docker compose -f all-services.yml up
 services:
@@ -13,10 +13,10 @@ services:
     ports:
       - "8080:8080"   # backend (Nginx)
       - "3000:3000"   # frontend (dev server)
-    # Mode dev : APP_ENV=dev, xdebug activé, et frontend lancé via `yarn ... dev`.
+    # Dev mode: APP_ENV=dev, xdebug enabled, and frontend started via `yarn ... dev`.
     command:
       - --start-all
       - --mode-dev
-    # Le frontend nécessite un dossier frontend/ dans votre application :
+    # The frontend requires a frontend/ folder in your application:
     # volumes:
     #   - ./:/application

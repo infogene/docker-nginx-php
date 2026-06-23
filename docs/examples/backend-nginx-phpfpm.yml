@@ -1,12 +1,12 @@
-# Backend par défaut : Nginx + PHP-FPM, supervisés séparément.
-# Sert /application/public via le vhost Symfony-friendly (fastcgi -> 127.0.0.1:9000).
+# Default backend: Nginx + PHP-FPM, supervised separately.
+# Serves /application/public through the Symfony-friendly vhost (fastcgi -> 127.0.0.1:9000).
 #
 #   docker compose -f backend-nginx-phpfpm.yml up
 #   -> http://localhost:8080
 services:
   app:
     image: ghcr.io/infogene/nginx-php:latest
-    # Pour tester depuis les sources du dépôt :
+    # To test against the repository sources instead:
     # build:
     #   context: ../..
     #   dockerfile: Dockerfile.alpine
@@ -14,6 +14,6 @@ services:
       - "8080:8080"
     command:
       - --start-backend
-    # Montez votre application (sinon le phpinfo() intégré à l'image est servi) :
+    # Mount your application (otherwise the image's built-in phpinfo() is served):
     # volumes:
     #   - ./:/application

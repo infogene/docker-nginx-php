@@ -1,8 +1,8 @@
-# Mode Supervisor générique (--start-supervisor-cli) : vous décrivez vous-même
-# les programmes via des --supervisor-program répétables. Ici, Nginx et PHP-FPM
-# en deux programmes indépendants (équivalent à --start-backend, mais explicite).
+# Generic Supervisor mode (--start-supervisor-cli): you describe the programs
+# yourself via repeatable --supervisor-program options. Here, Nginx and PHP-FPM
+# as two independent programs (equivalent to --start-backend, but explicit).
 #
-# Toutes les autres options --supervisor-* ont des défauts (user=www-data,
+# Every other --supervisor-* option has a default (user=www-data,
 # autostart/autorestart=true, stop/kill-as-group=true, logs -> stdout/stderr).
 #
 #   docker compose -f supervisor-multi-programs.yml up
@@ -27,6 +27,6 @@ services:
       - nginx -g "daemon off;"
       - --supervisor-program-name
       - nginx
-    # Montez votre application (sinon le phpinfo() intégré à l'image est servi) :
+    # Mount your application (otherwise the image's built-in phpinfo() is served):
     # volumes:
     #   - ./:/application
