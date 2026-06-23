@@ -327,24 +327,25 @@ start_cron() {
 }
 
 #######################################
-# Start frontend service
+# Register a program to be managed by Supervisor.
+# Appends a --supervisor-program block to SUPERVISOR_ARGS and arms the dispatcher.
+# Arguments:
+#   1: command line to run
+#   2: program name
+#######################################
+register_supervisor_program() {
+  SUPERVISOR_ARGS+=(--supervisor-program "$1" --supervisor-program-name "$2")
+  START_SUPERVISOR_CLI=1
+}
+
+#######################################
+# Register frontend service (managed by Supervisor as user www-data)
 #######################################
 start_frontend() {
   [[ $START_FRONTEND -eq 0 ]] && return 0
 
-  msg "${GREEN}  ↳ Starting frontend server...${NOFORMAT}"
-
-  if command -v docker-exec-www-data &>/dev/null; then
-    if [[ $START_BACKEND -eq 1 ]]; then
-      # Start in background if backend also starting
-      docker-exec-www-data yarn --cwd frontend "${APP_ENV:-dev}" &
-    else
-      # Start in foreground if only frontend
-      exec docker-exec-www-data yarn --cwd frontend "${APP_ENV:-dev}"
-    fi
-  else
-    die "docker-exec-www-data command not found"
-  fi
+  msg "${GREEN}  ↳ Registering frontend server (Supervisor)...${NOFORMAT}"
+  register_supervisor_program "yarn --cwd frontend ${APP_ENV:-dev}" "frontend"
 }
 
 #######################################
@@ -365,19 +366,15 @@ start_supervisor_cli() {
 }
 
 #######################################
-# Start backend service (Nginx + PHP-FPM)
+# Register backend services (Nginx + PHP-FPM) as separate Supervisor programs,
+# so each is supervised and restarted independently.
 #######################################
 start_backend() {
   [[ $START_BACKEND -eq 0 ]] && return 0
 
-  msg "${GREEN}  ↳ Starting Nginx + PHP-FPM...${NOFORMAT}"
-  echo ""
-
-  # Start Nginx in background
-  nginx -g 'daemon off;' &
-
-  # Start PHP-FPM in foreground
-  exec php-fpm -F
+  msg "${GREEN}  ↳ Registering Nginx + PHP-FPM (Supervisor)...${NOFORMAT}"
+  register_supervisor_program "php-fpm -F" "php-fpm"
+  register_supervisor_program 'nginx -g "daemon off;"' "nginx"
 }
 
 #######################################
@@ -399,10 +396,13 @@ main() {
 
   # Execution phase
   run_cli_mode          # Exits if CLI mode
-  start_supervisor_cli  # Exits if supervisor-cli mode
   start_cron            # Exits if cron mode
-  start_frontend        # May run in background
-  start_backend         # Exits with exec
+
+  # Register requested services as Supervisor programs, then hand off to a
+  # single supervisord that manages them all (backend + frontend together).
+  start_backend         # Registers Nginx + PHP-FPM
+  start_frontend        # Registers frontend
+  start_supervisor_cli  # Execs docker-supervisor-cli with all registered programs
 
   # If we reach here and nothing started, show warning
   msg "${YELLOW}⚠ No service started. Use --help for usage information.${NOFORMAT}"

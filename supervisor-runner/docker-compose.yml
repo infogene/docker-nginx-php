@@ -14,18 +14,18 @@ services:
     # nginx et php-fpm sont supervisés SÉPARÉMENT (restart indépendant, pas de wrapper).
     # Toutes les autres options --supervisor-* ont des défauts (user=www-data, autostart,
     # autorestart, stop/kill-as-group, logs vers stdout/stderr...) -> surchargeables.
-    command:
-      - --start-supervisor-cli
-
-      - --supervisor-program
-      - php-fpm -F
-      - --supervisor-program-name
-      - php-fpm
-
-      - --supervisor-program
-      - nginx -g "daemon off;"
-      - --supervisor-program-name
-      - nginx
+#    command:
+#      - --start-backend
+#
+#      - --supervisor-program
+#      - php-fpm -F
+#      - --supervisor-program-name
+#      - php-fpm
+#
+#      - --supervisor-program
+#      - nginx -g "daemon off;"
+#      - --supervisor-program-name
+#      - nginx
 
     # L'image contient déjà /application/public/index.php (phpinfo).
     # Montez votre app ici pour servir votre propre code :
