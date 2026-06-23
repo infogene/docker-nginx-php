@@ -17,7 +17,6 @@ docker-build:
   variables:
     PHP_VERSION: 8.4
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-    GHCR_IMAGE: ghcr.io/infogene/nginx-php
   before_script:
     - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   # All branches are tagged with $DOCKER_IMAGE_NAME (defaults to commit ref slug)
@@ -29,16 +28,24 @@ docker-build:
     - docker push "$DOCKER_IMAGE_NAME-alpine"
     - docker push "$DOCKER_IMAGE_NAME-debian"
     - docker push "$DOCKER_IMAGE_NAME"
+    # Versioned + `latest` images are published on a git tag, and on the monthly
+    # scheduled rebuild (no git tag — the version is derived from the date, e.g.
+    # v26-06-01). The scheduled rebuild uses `docker build --pull`, so it picks up
+    # the latest up-to-date PHP alpine/debian base images and the security fixes
+    # they ship. RELEASE is the version suffix in either case.
     - |
-      if [[ ! -z "$CI_COMMIT_TAG" ]]; then
-        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-        docker tag "$DOCKER_IMAGE_NAME-debian" "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+      RELEASE=""
+      [ -n "$CI_COMMIT_TAG" ] && RELEASE="$CI_COMMIT_TAG"
+      [ "$CI_PIPELINE_SOURCE" = "schedule" ] && RELEASE="v$(date -u +%y-%m-%d)"
+      if [ -n "$RELEASE" ]; then
+        docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$RELEASE"
+        docker tag "$DOCKER_IMAGE_NAME-debian" "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$RELEASE"
         docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine"
         docker tag "$DOCKER_IMAGE_NAME-debian" "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian"
         docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:$PHP_VERSION"
         docker tag "$DOCKER_IMAGE_NAME-alpine" "$CI_REGISTRY_IMAGE:latest"
-        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine-$RELEASE"
+        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian-$RELEASE"
         docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-alpine"
         docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-debian"
         docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION"
@@ -49,10 +56,14 @@ docker-build:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
+    # Monthly rebuild from up-to-date base images (set up via Build >
+    # Pipeline schedules, cron `0 0 1 * *` on the default branch). No extra
+    # CI/CD variable needed — only the default $CI_REGISTRY_* credentials.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
 # PUSH TO GitHub Container Registry
-# Mirrors the tagged images built by `docker-build` from the GitLab registry to ghcr.io.
-# Only runs on git tags (releases).
+# Mirrors the versioned images built by `docker-build` from the GitLab registry
+# to ghcr.io. Runs on git tags (releases) and on the monthly scheduled rebuild.
 ghcr-push:
   image: docker:cli
   stage: deploy
@@ -71,18 +82,25 @@ ghcr-push:
     # Pull the images that `docker-build` pushed to the GitLab registry
     - docker pull "$DOCKER_IMAGE_NAME-alpine"
     - docker pull "$DOCKER_IMAGE_NAME-debian"
-    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-    - docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
-    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine"
-    - docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian"
-    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION"
-    - docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:latest"
-    - docker push "$GHCR_IMAGE:$PHP_VERSION-alpine-$CI_COMMIT_TAG"
-    - docker push "$GHCR_IMAGE:$PHP_VERSION-debian-$CI_COMMIT_TAG"
-    - docker push "$GHCR_IMAGE:$PHP_VERSION-alpine"
-    - docker push "$GHCR_IMAGE:$PHP_VERSION-debian"
-    - docker push "$GHCR_IMAGE:$PHP_VERSION"
-    - docker push "$GHCR_IMAGE:latest"
-  # Only mirror to GHCR on git tags (releases)
+    # RELEASE = the git tag, or a date-based version on the monthly rebuild
+    # (kept in sync with docker-build).
+    - |
+      RELEASE=""
+      [ -n "$CI_COMMIT_TAG" ] && RELEASE="$CI_COMMIT_TAG"
+      [ "$CI_PIPELINE_SOURCE" = "schedule" ] && RELEASE="v$(date -u +%y-%m-%d)"
+      docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine-$RELEASE"
+      docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian-$RELEASE"
+      docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION-alpine"
+      docker tag "$DOCKER_IMAGE_NAME-debian" "$GHCR_IMAGE:$PHP_VERSION-debian"
+      docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:$PHP_VERSION"
+      docker tag "$DOCKER_IMAGE_NAME-alpine" "$GHCR_IMAGE:latest"
+      docker push "$GHCR_IMAGE:$PHP_VERSION-alpine-$RELEASE"
+      docker push "$GHCR_IMAGE:$PHP_VERSION-debian-$RELEASE"
+      docker push "$GHCR_IMAGE:$PHP_VERSION-alpine"
+      docker push "$GHCR_IMAGE:$PHP_VERSION-debian"
+      docker push "$GHCR_IMAGE:$PHP_VERSION"
+      docker push "$GHCR_IMAGE:latest"
+  # Mirror to GHCR on git tags (releases) and on the monthly scheduled rebuild
   rules:
     - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "schedule"
