@@ -69,10 +69,13 @@ RUN chmod +x /usr/local/bin/* && \
     chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
     chown -R :www-data /var/log/cron.log && \
     mkdir -p /var/lib/nginx /var/log/nginx && \
-    chown -R www-data:www-data /var/lib/nginx && \
-    chown -R www-data:www-data /var/log/nginx && \
+    chown -R www-data:root /var/lib/nginx && \
+    chown -R www-data:root /var/log/nginx && \
+    chmod -R 775 /var/lib/nginx && \
+    chmod -R 775 /var/log/nginx && \
     touch /run/nginx.pid && \
-    chown www-data:www-data /run/nginx.pid && \
+    chown www-data:root /run/nginx.pid && \
+    chmod 775 /run/nginx.pid && \
     sed -i 's/^user www-data;/#user www-data;/' /etc/nginx/nginx.conf || true && \
     #Grant nginx capability to bind privileged ports && \
     setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
