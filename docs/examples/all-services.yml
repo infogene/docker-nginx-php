@@ -1,0 +1,22 @@
+# Backend + frontend together, under a single supervisord.
+# --start-all = --start-backend + --start-frontend with their default commands:
+#   backend  : Nginx + PHP-FPM
+#   frontend : yarn --cwd frontend <env>   (requires a /application/frontend folder)
+#
+#   docker compose -f all-services.yml up
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    ports:
+      - "8080:8080"   # backend (Nginx)
+      - "3000:3000"   # frontend (dev server)
+    # Dev mode: APP_ENV=dev, xdebug enabled, and frontend started via `yarn ... dev`.
+    command:
+      - --start-all
+      - --mode-dev
+    # The frontend requires a frontend/ folder in your application:
+    # volumes:
+    #   - ./:/application

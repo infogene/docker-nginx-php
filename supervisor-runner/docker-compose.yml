@@ -1,0 +1,23 @@
+services:
+  app:
+    # Build the repository's base image: it ships the standard ENTRYPOINT
+    # (bin/docker-entrypoint) + the generator bin/docker-supervisor-cli.
+    build:
+      context: ..
+      dockerfile: Dockerfile.alpine
+    container_name: mycustom-supervisor
+    expose:
+      - 8080
+    ports:
+      - "18080:8080"
+    # --start-backend WITHOUT an argument -> default Nginx + PHP-FPM.
+    # WITH an argument -> overrides the backend command (here PHP's built-in server).
+    # (same for --start-frontend "<cmd>").
+    command:
+      - --start-backend
+      - php -S 0.0.0.0:8080 -t /application/public
+
+    # The image already contains /application/public/index.php (phpinfo).
+    # Mount your app here to serve your own code:
+    # volumes:
+    #   - ./:/application

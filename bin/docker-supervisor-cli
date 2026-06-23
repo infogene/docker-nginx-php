@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+#
+# Generates a supervisord.conf from CLI arguments (--supervisor-*) and then runs
+# supervisord. Invoked by docker-entrypoint via the --start-supervisor-cli option,
+# but also usable on its own.
+#
+# --supervisor-program is REPEATABLE: each occurrence opens a new [program]
+# section. Every other --supervisor-* option has a default value and is overridable:
+#   * placed BEFORE the 1st --supervisor-program -> global default (all programs)
+#   * placed AFTER a --supervisor-program        -> overrides THAT program only
+#
+# Mapping rule: --supervisor-<a>-<b> VALUE  ->  a_b=VALUE  in [program]
+#   exceptions:
+#     --supervisor-program        -> command=<VALUE> (opens a new program)
+#     --supervisor-program-name   -> current program name (default: app, app2, app3, ...)
+
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="$(basename "$0")"
+# Default path deliberately writable by both www-data and root.
+readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
+
+# --- Default values applied to EVERY program (overridable) -------------------
+declare -A GLOBAL=(
+  [autostart]="true"
+  [autorestart]="true"
+  [startretries]="3"
+  [stopasgroup]="true"
+  [killasgroup]="true"
+  [user]="www-data"
+  [stdout_logfile]="/dev/stdout"
+  [stderr_logfile]="/dev/stderr"
+  [stdout_logfile_maxbytes]="0"
+  [stderr_logfile_maxbytes]="0"
+)
+
+# Output order for known directives (readability). Unknown keys (new parameters)
+# are written afterwards, with no code change required.
+readonly KEY_ORDER=(
+  command autostart autorestart startsecs startretries
+  stopsignal stopwaitsecs stopasgroup killasgroup
+  user directory environment numprocs priority
+  stdout_logfile stdout_logfile_maxbytes
+  stderr_logfile stderr_logfile_maxbytes
+)
+
+# Accumulated programs
+declare -a PROG_CMD=()    # command per program
+declare -a PROG_NAME=()   # name per program ("" = default)
+declare -i CUR=-1         # index of the current program (-1 = none yet)
+
+die() {
+  echo >&2 "ERROR: $1"
+  exit "${2:-1}"
+}
+
+usage() {
+  cat <<EOF
+Usage: ${SCRIPT_NAME} --supervisor-program "<cmd>" [--supervisor-program "<cmd2>" ...] [OPTIONS...]
+
+Dynamically generates a supervisord.conf (one [program] section per
+--supervisor-program) then runs supervisord.
+
+Required (repeatable):
+  --supervisor-program "<cmd>"     Opens a new [program] section
+
+Optional — defaults applied to each program (overridable):
+  --supervisor-program-name NAME   Current program name      (default: app, app2, ...)
+  --supervisor-autostart BOOL      autostart                 (default: true)
+  --supervisor-autorestart BOOL    autorestart               (default: true)
+  --supervisor-startretries N      startretries              (default: 3)
+  --supervisor-stopasgroup BOOL    stopasgroup               (default: true)
+  --supervisor-killasgroup BOOL    killasgroup               (default: true)
+  --supervisor-user USER           user                      (default: www-data)
+  --supervisor-stdout-logfile PATH stdout_logfile            (default: /dev/stdout)
+  --supervisor-stderr-logfile PATH stderr_logfile            (default: /dev/stderr)
+
+Option scope:
+  * BEFORE the 1st --supervisor-program -> global default (all programs)
+  * AFTER a --supervisor-program        -> overrides THAT program only
+
+Extensible: any --supervisor-<a>-<b> VALUE option becomes "a_b=VALUE".
+Example: --supervisor-stop-signal TERM -> stop_signal=TERM
+
+  -h, --help                       Show this help
+EOF
+  exit 0
+}
+
+# Opens a new program initialized with the current global defaults.
+new_program() {
+  CUR=$((CUR + 1))
+  PROG_CMD[$CUR]="$1"
+  PROG_NAME[$CUR]=""
+  declare -gA "PROGDIR_${CUR}"
+  local -n _dir="PROGDIR_${CUR}"
+  local k
+  for k in "${!GLOBAL[@]}"; do
+    _dir["$k"]="${GLOBAL[$k]}"
+  done
+}
+
+# Applies a directive: to the current program, or to the global defaults if no
+# program has been opened yet.
+set_directive() {
+  local key="$1" val="$2"
+  if [[ $CUR -lt 0 ]]; then
+    GLOBAL["$key"]="$val"
+  else
+    local -n _dir="PROGDIR_${CUR}"
+    _dir["$key"]="$val"
+  fi
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        ;;
+      --supervisor-program)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
+        new_program "$2"
+        shift 2
+        ;;
+      --supervisor-program-name)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
+        [[ $CUR -ge 0 ]] || die "$1 must follow a --supervisor-program"
+        [[ "$2" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Invalid program name: $2"
+        PROG_NAME[$CUR]="$2"
+        shift 2
+        ;;
+      --supervisor-*)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value"
+        local key="${1#--supervisor-}"   # e.g. stdout-logfile
+        key="${key//-/_}"                # e.g. stdout_logfile
+        set_directive "$key" "$2"
+        shift 2
+        ;;
+      *)
+        die "Unknown argument: $1 (see --help)"
+        ;;
+    esac
+  done
+
+  [[ $CUR -ge 0 ]] || die "at least one --supervisor-program is required (see --help)"
+}
+
+# Writes the [program] section at index $1. Fresh nameref on each call.
+emit_program() {
+  local idx="$1"
+  local name="${PROG_NAME[$idx]}"
+  if [[ -z "$name" ]]; then
+    [[ $idx -eq 0 ]] && name="app" || name="app$((idx + 1))"
+  fi
+
+  local -n _dir="PROGDIR_${idx}"
+  echo ""
+  echo "[program:${name}]"
+  echo "command=${PROG_CMD[$idx]}"
+
+  # Known directives, in order (skip "command", already written)
+  local emitted=" command "
+  local key
+  for key in "${KEY_ORDER[@]}"; do
+    [[ "$key" == "command" ]] && continue
+    if [[ -n "${_dir[$key]+set}" ]]; then
+      echo "${key}=${_dir[$key]}"
+      emitted+="$key "
+    fi
+  done
+
+  # Extra directives not listed in KEY_ORDER (extensibility)
+  for key in "${!_dir[@]}"; do
+    [[ "$emitted" == *" $key "* ]] && continue
+    echo "${key}=${_dir[$key]}"
+  done
+}
+
+generate_conf() {
+  mkdir -p "$(dirname "$SUPERVISORD_CONF")"
+  {
+    echo "[supervisord]"
+    echo "nodaemon=true"
+    # Keep supervisord off the application directory (cwd): each program already
+    # forwards its own stdout/stderr to the container logs, and writing into
+    # /application would break a read-only root filesystem. The pidfile lives in
+    # /tmp (writable / tmpfs-friendly).
+    echo "logfile=/dev/null"
+    echo "logfile_maxbytes=0"
+    echo "pidfile=/tmp/supervisord.pid"
+    local i
+    for ((i = 0; i <= CUR; i++)); do
+      emit_program "$i"
+    done
+  } > "$SUPERVISORD_CONF"
+}
+
+main() {
+  parse_args "$@"
+  generate_conf
+
+  echo ">> Generated Supervisor configuration (${SUPERVISORD_CONF}):"
+  echo "----------------------------------------"
+  cat "$SUPERVISORD_CONF"
+  echo "----------------------------------------"
+
+  exec supervisord -c "$SUPERVISORD_CONF"
+}
+
+main "$@"

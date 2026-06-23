@@ -1,0 +1,19 @@
+# Backend with an overridden command: here PHP's built-in web server instead of
+# Nginx + PHP-FPM. Pass the command as the argument to --start-backend.
+#
+#   docker compose -f backend-custom-command.yml up
+#   -> http://localhost:8080
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    ports:
+      - "8080:8080"
+    command:
+      - --start-backend
+      - php -S 0.0.0.0:8080 -t /application/public
+    # Mount your application (otherwise the image's built-in phpinfo() is served):
+    # volumes:
+    #   - ./:/application

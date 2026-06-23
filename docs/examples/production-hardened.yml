@@ -1,0 +1,106 @@
+# Production-hardened backend (Nginx + PHP-FPM).
+#
+# Layers the options you typically want in production on top of the base image:
+# health checking, capability dropping, a read-only root filesystem (with the
+# few writable paths exposed as tmpfs), resource limits, ulimits and log
+# rotation. Verified to serve HTTP 200 with this exact configuration.
+#
+#   docker compose -f production-hardened.yml up
+#   -> http://localhost:8080
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    command:
+      - --start-backend
+      - --mode-prod
+    ports:
+      - "8080:8080"
+
+    # Restart automatically unless the operator stopped the container on purpose.
+    restart: unless-stopped
+
+    # Liveness probe: the orchestrator restarts the container if the vhost stops
+    # answering. curl ships in the image; 8080 is the vhost port.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # --- Security hardening -------------------------------------------------
+    # The image already runs as the non-root user www-data (uid/gid 1000).
+    # Drop every Linux capability, then add back only what is required.
+    cap_drop:
+      - ALL
+    cap_add:
+      # REQUIRED for the default Nginx backend: the nginx binary carries the
+      # cap_net_bind_service file capability (setcap), so that capability must
+      # stay in the container's bounding set or execve() fails with EPERM —
+      # even on port 8080. (It is what also lets you rebind Nginx to a port
+      # below 1024.) For a backend without setcap (e.g. PHP's built-in server),
+      # you can drop this too — see hardened-php-builtin.yml.
+      - NET_BIND_SERVICE
+
+    # NOTE: `security_opt: [no-new-privileges:true]` is intentionally NOT set
+    # here. It is incompatible with the setcap'd nginx binary (the kernel
+    # refuses to apply the file capability under no_new_privs, breaking nginx).
+    # If you need no-new-privileges, use a backend without file capabilities —
+    # see hardened-php-builtin.yml.
+
+    # Read-only root filesystem. The base image only writes to a handful of
+    # paths; expose those as tmpfs (mode 1777 so the www-data user can write)
+    # so the rest of the filesystem stays immutable.
+    read_only: true
+    volumes:
+      # docker-supervisor-cli writes /tmp/supervisord.conf (+ supervisor pid).
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { mode: 01777 }
+      # nginx pid + lock file.
+      - type: tmpfs
+        target: /run/nginx
+        tmpfs: { mode: 01777 }
+      # nginx client_body / proxy / fastcgi / uwsgi / scgi temp dirs.
+      - type: tmpfs
+        target: /var/lib/nginx/tmp
+        tmpfs: { mode: 01777 }
+      # nginx access/error logs (also reached via the /var/lib/nginx/logs symlink).
+      - type: tmpfs
+        target: /var/log/nginx
+        tmpfs: { mode: 01777 }
+      # Mount your application here (otherwise the image's built-in phpinfo() is
+      # served). Use :ro if your app does not write to its own source tree.
+      # - type: bind
+      #   source: ./
+      #   target: /application
+      #   read_only: true
+
+    # --- Resource limits ----------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          # Cap the number of processes (defense against fork bombs / runaway workers).
+          pids: 256
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    # Raise the open-file limit for PHP-FPM/Nginx under load.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # --- Logging ------------------------------------------------------------
+    # Supervisor forwards each program's stdout/stderr to the container logs;
+    # rotate them so they cannot fill the host disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,64 @@
+# Background worker / job (no web server) via --start-supervisor-cli, hardened.
+# Example: a Symfony Messenger consumer, automatically restarted.
+# Options placed AFTER a --supervisor-program override THAT program (here
+# startretries=10); placed before the 1st program, they become global defaults
+# for all programs.
+#
+# The worker binary (php bin/console) carries no file capabilities, so it runs
+# under a strict sandbox: ALL capabilities dropped, no-new-privileges, and a
+# read-only root filesystem. The application is bind-mounted read-write so the
+# framework can still write its cache/logs; only /tmp is added as tmpfs.
+#
+#   docker compose -f supervisor-worker.yml up
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    command:
+      - --start-supervisor-cli
+
+      - --supervisor-program
+      - php bin/console messenger:consume async --time-limit=3600
+      - --supervisor-program-name
+      - messenger
+      - --supervisor-startretries
+      - "10"
+
+    restart: unless-stopped
+
+    # --- Security hardening -------------------------------------------------
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+    # --- Resource limits ----------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 256
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+    # --- Logging ------------------------------------------------------------
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    volumes:
+      # docker-supervisor-cli writes /tmp/supervisord.conf; the framework may
+      # also use /tmp. Everything else on the rootfs stays read-only.
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { mode: 01777 }
+      # The worker runs YOUR application's code: mount it here (read-write so
+      # the framework can write var/cache, var/log, etc.).
+      - ./:/application
