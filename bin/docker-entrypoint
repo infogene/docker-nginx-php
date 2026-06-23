@@ -401,7 +401,18 @@ start_backend() {
 
   msg "${GREEN}  ↳ Registering Nginx + PHP-FPM (Supervisor)...${NOFORMAT}"
   register_supervisor_program "php-fpm -F" "php-fpm"
-  register_supervisor_program 'nginx -g "daemon off;"' "nginx"
+
+  # nginx global directives. When the container runs as root the nginx master is
+  # root and would spawn workers as its compiled-in default user (nginx, uid 100),
+  # which cannot write the www-data-owned runtime dirs (/var/lib/nginx/tmp/...),
+  # breaking request-body buffering on uploads. Pin workers to www-data — the
+  # owner of those dirs. Done only as root: a non-root master can't switch user
+  # and nginx would just warn about the directive.
+  local nginx_g="daemon off;"
+  if [[ $(id -u) -eq 0 ]]; then
+    nginx_g="user www-data; ${nginx_g}"
+  fi
+  register_supervisor_program "nginx -g \"${nginx_g}\"" "nginx"
 }
 
 #######################################
