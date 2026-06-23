@@ -20,6 +20,16 @@ readonly SCRIPT_NAME="$(basename "$0")"
 # Default path deliberately writable by both www-data and root.
 readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
 
+# Run programs as the user the container was launched as. The image runs as
+# www-data by default, but if it is started with `--user root` supervisord runs
+# as root (PID 1) and opens the program log fds as root. php-fpm's docker.conf
+# sets `error_log = /proc/self/fd/2` and RE-opens that fd at init; if we forced
+# a privilege drop to www-data, php-fpm could not re-open the root-owned fd and
+# died with "failed to open error_log (/proc/self/fd/2): Permission denied".
+# Matching the program user to the launch user keeps the fd owner consistent
+# (and respects an explicit `--user root`).
+readonly RUN_USER="$(id -un)"
+
 # --- Default values applied to EVERY program (overridable) -------------------
 declare -A GLOBAL=(
   [autostart]="true"
@@ -27,7 +37,7 @@ declare -A GLOBAL=(
   [startretries]="3"
   [stopasgroup]="true"
   [killasgroup]="true"
-  [user]="www-data"
+  [user]="${RUN_USER}"
   [stdout_logfile]="/dev/stdout"
   [stderr_logfile]="/dev/stderr"
   [stdout_logfile_maxbytes]="0"
@@ -189,6 +199,9 @@ generate_conf() {
     echo "logfile=/dev/null"
     echo "logfile_maxbytes=0"
     echo "pidfile=/tmp/supervisord.pid"
+    # When launched as root, declare it so supervisord doesn't emit the
+    # "running as root, privileges were not dropped" CRIT warning.
+    [[ "$RUN_USER" == "root" ]] && echo "user=root"
     local i
     for ((i = 0; i <= CUR; i++)); do
       emit_program "$i"
