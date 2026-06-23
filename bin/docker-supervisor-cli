@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+#
+# Génère un supervisord.conf à partir des arguments CLI (--supervisor-*) puis
+# lance supervisord. Appelé par docker-entrypoint via l'option --start-supervisor-cli,
+# mais utilisable aussi seul.
+#
+# Règle de mapping : --supervisor-<a>-<b> VALUE  ->  a_b=VALUE  dans [program:NAME]
+#   exceptions :
+#     --supervisor-program        -> command=<VALUE>   (obligatoire)
+#     --supervisor-program-name   -> [program:<VALUE>] (défaut: app)
+
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="$(basename "$0")"
+# Chemin par défaut volontairement inscriptible par www-data comme par root.
+readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
+
+# --- Valeurs par défaut du programme -----------------------------------------
+PROGRAM_NAME="app"
+PROG_COMMAND=""
+declare -A PROG=(
+  [autostart]="true"
+  [autorestart]="true"
+  [startretries]="3"
+  [user]="root"
+  [stdout_logfile]="/dev/stdout"
+  [stderr_logfile]="/dev/stderr"
+  [stdout_logfile_maxbytes]="0"
+  [stderr_logfile_maxbytes]="0"
+)
+
+# Ordre d'écriture des directives connues (lisibilité). Les clés inconnues
+# (nouveaux paramètres) sont écrites ensuite, sans modification de code.
+readonly KEY_ORDER=(
+  command autostart autorestart startsecs startretries
+  stopsignal stopwaitsecs killasgroup stopasgroup
+  user directory environment numprocs priority
+  stdout_logfile stdout_logfile_maxbytes
+  stderr_logfile stderr_logfile_maxbytes
+)
+
+die() {
+  echo >&2 "ERREUR: $1"
+  exit "${2:-1}"
+}
+
+usage() {
+  cat <<EOF
+Usage: ${SCRIPT_NAME} --supervisor-program "<commande>" [OPTIONS...]
+
+Génère dynamiquement un supervisord.conf et lance supervisord.
+
+Obligatoire:
+  --supervisor-program "<cmd>"     Commande à superviser (ex: "php bin/console ...")
+
+Optionnel (avec valeurs par défaut):
+  --supervisor-program-name NAME   Nom du programme         (défaut: app)
+  --supervisor-autostart BOOL      autostart                (défaut: true)
+  --supervisor-autorestart BOOL    autorestart              (défaut: true)
+  --supervisor-startretries N      startretries             (défaut: 3)
+  --supervisor-user USER           user                     (défaut: root)
+  --supervisor-stdout-logfile PATH stdout_logfile           (défaut: /dev/stdout)
+  --supervisor-stderr-logfile PATH stderr_logfile           (défaut: /dev/stderr)
+
+Extensible : toute option --supervisor-<a>-<b> VALUE devient « a_b=VALUE »
+dans la section [program]. Exemple : --supervisor-stop-signal TERM -> stop_signal=TERM
+
+  -h, --help                       Affiche cette aide
+EOF
+  exit 0
+}
+
+# --- Parsing des arguments ----------------------------------------------------
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        ;;
+      --supervisor-program-name)
+        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
+        PROGRAM_NAME="$2"
+        shift 2
+        ;;
+      --supervisor-program)
+        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
+        PROG_COMMAND="$2"
+        shift 2
+        ;;
+      --supervisor-*)
+        [[ $# -ge 2 ]] || die "L'option $1 requiert une valeur"
+        local key="${1#--supervisor-}"   # ex: stdout-logfile
+        key="${key//-/_}"                # ex: stdout_logfile
+        PROG["$key"]="$2"
+        shift 2
+        ;;
+      *)
+        die "Argument inconnu: $1 (voir --help)"
+        ;;
+    esac
+  done
+
+  [[ -n "$PROG_COMMAND" ]] || die "--supervisor-program est obligatoire (voir --help)"
+  [[ "$PROGRAM_NAME" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Nom de programme invalide: $PROGRAM_NAME"
+}
+
+# --- Génération du fichier de configuration -----------------------------------
+generate_conf() {
+  mkdir -p "$(dirname "$SUPERVISORD_CONF")"
+
+  {
+    echo "[supervisord]"
+    echo "nodaemon=true"
+    echo ""
+    echo "[program:${PROGRAM_NAME}]"
+    echo "command=${PROG_COMMAND}"
+
+    # Directives connues, dans l'ordre (on saute "command", déjà écrite)
+    local emitted=" command "
+    local key
+    for key in "${KEY_ORDER[@]}"; do
+      [[ "$key" == "command" ]] && continue
+      if [[ -n "${PROG[$key]+set}" ]]; then
+        echo "${key}=${PROG[$key]}"
+        emitted+="$key "
+      fi
+    done
+
+    # Directives supplémentaires non listées dans KEY_ORDER (extensibilité)
+    for key in "${!PROG[@]}"; do
+      [[ "$emitted" == *" $key "* ]] && continue
+      echo "${key}=${PROG[$key]}"
+    done
+  } > "$SUPERVISORD_CONF"
+}
+
+main() {
+  parse_args "$@"
+  generate_conf
+
+  echo ">> Configuration Supervisor générée (${SUPERVISORD_CONF}) :"
+  echo "----------------------------------------"
+  cat "$SUPERVISORD_CONF"
+  echo "----------------------------------------"
+
+  exec supervisord -c "$SUPERVISORD_CONF"
+}
+
+main "$@"

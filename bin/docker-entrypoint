@@ -17,6 +17,8 @@ declare -i MODE_PROD=0
 declare -i START_CRON=0
 declare -i START_BACKEND=0
 declare -i START_FRONTEND=0
+declare -i START_SUPERVISOR_CLI=0
+declare -a SUPERVISOR_ARGS=()
 declare BOOT_CMD="${APP_BOOT_CMD:-}"
 declare CLI_CMD=""
 
@@ -95,6 +97,13 @@ OPTIONS:
   --start-backend         Start Nginx + PHP-FPM only
   --start-frontend        Start frontend server only
   --start-all             Start both backend and frontend services
+  --start-supervisor-cli  Generate a supervisord config from --supervisor-* args
+                          and run supervisord (see docker-supervisor-cli --help)
+
+  Supervisor Options (only with --start-supervisor-cli, forwarded as-is):
+  --supervisor-program "<cmd>"     Command to supervise (required)
+  --supervisor-program-name NAME   Program name (default: app)
+  --supervisor-<a>-<b> VALUE       Any supervisor directive -> a_b=VALUE
 
   Execution Options:
   --boot-cmd COMMAND      Run command during bootstrap (e.g., "php bin/console cache:clear")
@@ -174,6 +183,16 @@ parse_params() {
         START_BACKEND=1
         START_FRONTEND=1
         shift
+        ;;
+      --start-supervisor-cli)
+        START_SUPERVISOR_CLI=1
+        shift
+        ;;
+      --supervisor-*)
+        # Collected verbatim and forwarded to docker-supervisor-cli
+        [[ $# -ge 2 ]] || die "Missing value for $1"
+        SUPERVISOR_ARGS+=("$1" "$2")
+        shift 2
         ;;
       --boot-cmd)
         BOOT_CMD="${2:-}"
@@ -329,6 +348,23 @@ start_frontend() {
 }
 
 #######################################
+# Start Supervisor with a CLI-generated config
+# Forwards all collected --supervisor-* args to docker-supervisor-cli,
+# which generates the supervisord.conf and execs supervisord.
+#######################################
+start_supervisor_cli() {
+  [[ $START_SUPERVISOR_CLI -eq 0 ]] && return 0
+
+  msg "${GREEN}  ↳ Starting Supervisor (CLI-generated config)...${NOFORMAT}"
+  echo ""
+
+  command -v docker-supervisor-cli &>/dev/null \
+    || die "docker-supervisor-cli command not found"
+
+  exec docker-supervisor-cli "${SUPERVISOR_ARGS[@]}"
+}
+
+#######################################
 # Start backend service (Nginx + PHP-FPM)
 #######################################
 start_backend() {
@@ -362,10 +398,11 @@ main() {
   run_boot_command
 
   # Execution phase
-  run_cli_mode    # Exits if CLI mode
-  start_cron      # Exits if cron mode
-  start_frontend  # May run in background
-  start_backend   # Exits with exec
+  run_cli_mode          # Exits if CLI mode
+  start_supervisor_cli  # Exits if supervisor-cli mode
+  start_cron            # Exits if cron mode
+  start_frontend        # May run in background
+  start_backend         # Exits with exec
 
   # If we reach here and nothing started, show warning
   msg "${YELLOW}⚠ No service started. Use --help for usage information.${NOFORMAT}"

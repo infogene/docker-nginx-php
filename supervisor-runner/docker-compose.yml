@@ -1,0 +1,55 @@
+services:
+  app:
+    # Build de l'image de base du dépôt : elle embarque désormais l'ENTRYPOINT
+    # standard (bin/docker-entrypoint) + le générateur bin/docker-supervisor-cli.
+    build:
+      context: ..
+      dockerfile: Dockerfile.alpine
+    container_name: mycustom-supervisor
+    expose:
+      - 8080
+    ports:
+      - "18080:8080"
+    # On passe par l'entrypoint standard avec la NOUVELLE option --start-supervisor-cli.
+    # IMPORTANT : chaque élément de la liste = un seul argument argv.
+    # La commande applicative tient donc sur UNE seule ligne (espaces préservés).
+    command:
+      - --start-supervisor-cli
+
+      # nginx + php-fpm = 2 process, mais --supervisor-program n'en définit qu'un.
+      # Wrapper bash : php-fpm + nginx en arrière-plan, `wait -n` sort dès que l'un meurt,
+      # et `trap "kill 0" EXIT` tue l'autre avant de quitter (sinon il reste orphelin et
+      # garde le port 8080 -> le redémarrage échouerait en boucle). => autorestart propre.
+      - --supervisor-program
+      - /bin/bash -c 'trap "kill 0" EXIT; php-fpm -F & nginx -g "daemon off;" & wait -n'
+
+      - --supervisor-autostart
+      - "true"
+
+      - --supervisor-autorestart
+      - "true"
+
+      - --supervisor-startretries
+      - "10"
+
+      # Propage l'arrêt/kill à TOUT le groupe de process (php-fpm + nginx), pas juste au wrapper.
+      - --supervisor-stopasgroup
+      - "true"
+
+      - --supervisor-killasgroup
+      - "true"
+
+      # www-data = utilisateur courant de l'image -> pas besoin de root.
+      - --supervisor-user
+      - www-data
+
+      - --supervisor-stdout-logfile
+      - /dev/stdout
+
+      - --supervisor-stderr-logfile
+      - /dev/stderr
+
+    # L'image contient déjà /application/public/index.php (phpinfo).
+    # Montez votre app ici pour servir votre propre code :
+    # volumes:
+    #   - ./:/application
