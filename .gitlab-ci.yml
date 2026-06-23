@@ -26,7 +26,10 @@ docker-build:
     - docker:dind
   variables:
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-  # One job per (PHP version × OS), run in parallel
+  # Serialize the matrix: only one instance of this group runs at a time, so the
+  # (PHP version × OS) combinations build one after another instead of all at once.
+  resource_group: docker-build
+  # One job per (PHP version × OS)
   # (e.g. docker-build: [8.4, alpine], [8.4, debian], [8.5, alpine], [8.5, debian])
   parallel:
     matrix:
@@ -92,6 +95,8 @@ ghcr-push:
   variables:
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     GHCR_IMAGE: ghcr.io/infogene/nginx-php
+  # Serialize the matrix: only one instance of this group runs at a time
+  resource_group: ghcr-push
   # One job per (PHP version × OS), mirroring each variant built by docker-build
   parallel:
     matrix:
