@@ -1,0 +1,25 @@
+# Worker / job en arrière-plan (sans serveur web) via --start-supervisor-cli.
+# Exemple : un consumer Symfony Messenger, redémarré automatiquement.
+# Les options placées APRÈS un --supervisor-program surchargent CE programme
+# (ici startretries=10) ; placées avant le 1er programme, elles deviennent des
+# défauts globaux pour tous les programmes.
+#
+#   docker compose -f supervisor-worker.yml up
+services:
+  app:
+    image: ghcr.io/infogene/nginx-php:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile.alpine
+    command:
+      - --start-supervisor-cli
+
+      - --supervisor-program
+      - php bin/console messenger:consume async --time-limit=3600
+      - --supervisor-program-name
+      - messenger
+      - --supervisor-startretries
+      - "10"
+    # Le worker exécute le code de VOTRE application : montez-la ici.
+    volumes:
+      - ./:/application
