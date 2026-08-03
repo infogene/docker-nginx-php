@@ -26,6 +26,7 @@ docker-build:
     - docker:dind
   variables:
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    DOCKER_BUILDKIT: 0
   # Serialize the matrix: only one instance of this group runs at a time, so the
   # (PHP version × OS) combinations build one after another instead of all at once.
   resource_group: docker-build
