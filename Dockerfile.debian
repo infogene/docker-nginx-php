@@ -44,9 +44,9 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
 
 
 ## Install node, npm + yarn
-RUN curl -fsSL https://nodejs.org/dist/v24.13.0/node-v24.13.0-linux-x64.tar.xz -o /tmp/node-v24.13.0-linux-x64.tar.xz  && \
-    tar -xJf /tmp/node-v24.13.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
-    rm /tmp/node-v24.13.0-linux-x64.tar.xz && \
+RUN curl -fsSL https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz -o /tmp/node-v24.21.0-linux-x64.tar.xz  && \
+    tar -xJf /tmp/node-v24.21.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
+    rm /tmp/node-v24.21.0-linux-x64.tar.xz && \
     npm install --global yarn
 
 ## Copy App
