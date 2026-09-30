@@ -21,7 +21,7 @@ WORKDIR $APP_DIR
 # Install packages
 RUN apt update --yes -q && \
     apt install --no-install-recommends --yes -q \
-    sudo make curl wget zip nano git openssl nginx cron bash figlet supervisor && \
+    sudo make curl wget zip nano git openssl nginx cron bash figlet supervisor mariadb-client && \
     apt autoremove -yq && apt autoclean -yq && rm -rf /var/lib/apt/lists/*
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer

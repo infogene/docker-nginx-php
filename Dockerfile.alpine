@@ -21,7 +21,7 @@ WORKDIR $APP_DIR
 # Install packages
 RUN apk update && \
     apk add --update --no-cache \
-    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor
+    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
