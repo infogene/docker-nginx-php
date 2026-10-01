@@ -28,6 +28,7 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
     chmod +x /usr/local/bin/install-php-extensions && \
     install-php-extensions \
         apcu \
+        bcmath \
         excimer \
         opcache \
         redis \
