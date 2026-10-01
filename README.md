@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="nginx-php logo" width="160">
+</p>
+
 # nginx-php — Docker image for PHP web applications
 
 A general-purpose Docker image for PHP web applications, built on the **official PHP

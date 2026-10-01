@@ -3,6 +3,7 @@
 /.cache
 /.vscode
 /.vagrant
+/.claude
 .DS_Store
 *.swp
 /mutagen.yml
