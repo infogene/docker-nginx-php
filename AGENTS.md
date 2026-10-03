@@ -80,6 +80,10 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 
 **Runtime env vars** read by the entrypoint: `APP_ENV` (dev/prod), `APP_BOOT_CMD` (same as `--boot-cmd`), and the boolean (`1`/`true`) or list vars applied during setup, before the boot command: `APP_BOOT_PHP_XDEBUG_ENABLED`, `APP_BOOT_PHP_EXT_ENABLED` (space-separated, root only — warns otherwise), `APP_BOOT_PERMS_FLUSH` (runs `docker-permissions-flush`, dies on failure). `APP_DIR` defaults to `/application`.
 
+**Runtime settings come from env vars.** `conf/php.ini` and `conf/php-fpm.conf` use `${VAR}` placeholders (expanded by PHP / PHP-FPM at startup); their defaults are the `ENV PHP_*` / `PHP_FPM_PM*` block near the end of both Dockerfiles — an unset variable would expand to an empty value, so every placeholder needs an `ENV` default. nginx cannot read env vars: `render_nginx_runtime_conf` (entrypoint, default backend only) writes `/tmp/nginx/runtime.conf` (`client_max_body_size` from `NGINX_CLIENT_MAX_BODY_SIZE`, default `PHP_POST_MAX_SIZE`), included by the vhost; the http-level `client_max_body_size 10M` is the fallback when nginx is started without the entrypoint (Alpine's `nginx.conf` declares its own at http level: the Alpine Dockerfile deletes it, a duplicate is fatal). pcov is loaded but `pcov.enabled=${PHP_PCOV_ENABLED}` (0).
+
+**Health check.** `HEALTHCHECK CMD docker-healthcheck`: if the default backend was started (marker: `/tmp/nginx/runtime.conf`, rendered by the entrypoint), `curl /healthz`, which the vhost maps to PHP-FPM's `ping.path` (`/fpm-ping`, suppressed from the FPM access log — `access.suppress_path` needs PHP ≥ 8.2); otherwise healthy (cron, workers, CLI, custom backend).
+
 **nginx vhost** (`conf/nginx.vhost.conf`) is Symfony-shaped: front controller is `/application/public/index.php`, only `index.php` may execute PHP (all other `.php` → 404), `fastcgi_pass 127.0.0.1:9000`, `client_max_body_size 10M`.
 
 ## Pinned versions and supply chain

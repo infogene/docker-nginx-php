@@ -27,10 +27,16 @@ services:
     # time before Docker's SIGKILL (default: 10 s).
     stop_grace_period: 30s
 
-    # Liveness probe: the orchestrator restarts the container if the vhost stops
-    # answering. curl ships in the image; 8080 is the vhost port.
+    # Production PHP settings (see the README for every PHP_* variable).
+    environment:
+      PHP_OPCACHE_VALIDATE_TIMESTAMPS: "0"
+      # ~40 MB per worker within the 512M limit below
+      PHP_FPM_PM_MAX_CHILDREN: "10"
+
+    # Liveness probe (the image's default, shown here to tune it): Nginx and
+    # PHP-FPM must answer /healthz, without running the application.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      test: ["CMD", "docker-healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

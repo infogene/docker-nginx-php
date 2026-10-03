@@ -137,6 +137,8 @@ ENVIRONMENT VARIABLES:
   APP_BOOT_PERMS_FLUSH          If 1/true, adjust /application permissions at startup
   APP_BOOT_PHP_XDEBUG_ENABLED   If 1/true, enable xdebug (requires root)
   APP_BOOT_PHP_EXT_ENABLED      Space-separated PHP extensions to enable (requires root)
+  PHP_*, PHP_FPM_PM*            php.ini / PHP-FPM settings (see README)
+  NGINX_CLIENT_MAX_BODY_SIZE    Nginx request body limit (default: PHP_POST_MAX_SIZE)
 
 EXAMPLES:
   # Start in production mode with backend only
@@ -456,6 +458,19 @@ start_supervisor_cli() {
 }
 
 #######################################
+# Render the runtime part of the nginx vhost from environment variables, in
+# /tmp/nginx (included by conf/nginx.vhost.conf; /tmp stays writable under a
+# read-only root filesystem).
+#######################################
+render_nginx_runtime_conf() {
+  local size="${NGINX_CLIENT_MAX_BODY_SIZE:-${PHP_POST_MAX_SIZE:-10M}}"
+  [[ "$size" =~ ^[0-9]+[kKmMgG]?$ ]] || die "Invalid NGINX_CLIENT_MAX_BODY_SIZE: ${size}"
+
+  mkdir -p /tmp/nginx
+  printf 'client_max_body_size %s;\n' "$size" > /tmp/nginx/runtime.conf
+}
+
+#######################################
 # Register backend services (Nginx + PHP-FPM) as separate Supervisor programs,
 # so each is supervised and restarted independently.
 #######################################
@@ -470,6 +485,7 @@ start_backend() {
   fi
 
   msg "${GREEN}  ↳ Registering Nginx + PHP-FPM (Supervisor)...${NOFORMAT}"
+  render_nginx_runtime_conf
 
   # Graceful stop: QUIT lets both finish in-flight requests (TERM drops them).
   # PHP-FPM waits up to process_control_timeout (conf/php-fpm.conf) for its

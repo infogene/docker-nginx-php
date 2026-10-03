@@ -102,7 +102,8 @@ RUN chmod +x /usr/local/bin/* && \
     touch /run/nginx/nginx.pid && \
     chown -R www-data:root /run/nginx && \
     chmod -R 775 /run/nginx/nginx.pid && \
-    sed -i 's/^user nginx;/#user nginx;/' /etc/nginx/nginx.conf && \
+    # client_max_body_size is owned by the vhost (http-level default + per-server runtime value) \
+    sed -i -e 's/^user nginx;/#user nginx;/' -e '/^[[:space:]]*client_max_body_size /d' /etc/nginx/nginx.conf && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
     echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> ${ETC_BASHRC} && \
     echo 'umask 0002' >> ${ETC_BASHRC} && \
@@ -111,7 +112,25 @@ RUN chmod +x /usr/local/bin/* && \
     rm -rf ${HOME_WWW}/.composer/* && \
     rm -rf /var/cache/*
 
+## Runtime PHP / PHP-FPM settings used by conf/php.ini and conf/php-fpm.conf: override with `-e`
+ENV PHP_MEMORY_LIMIT='256M' \
+    PHP_MAX_EXECUTION_TIME='60' \
+    PHP_POST_MAX_SIZE='10M' \
+    PHP_UPLOAD_MAX_FILESIZE='10M' \
+    PHP_DATE_TIMEZONE='Europe/Paris' \
+    PHP_OPCACHE_VALIDATE_TIMESTAMPS='1' \
+    PHP_OPCACHE_PRELOAD='' \
+    PHP_PCOV_ENABLED='0' \
+    PHP_FPM_PM='dynamic' \
+    PHP_FPM_PM_MAX_CHILDREN='5' \
+    PHP_FPM_PM_START_SERVERS='2' \
+    PHP_FPM_PM_MIN_SPARE_SERVERS='1' \
+    PHP_FPM_PM_MAX_SPARE_SERVERS='3' \
+    PHP_FPM_PM_MAX_REQUESTS='500'
+
 EXPOSE 8080 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["docker-healthcheck"]
 
 ## OCI metadata (declared last: VCS_REF changes on every commit and must not bust the layer cache)
 ARG VCS_REF=''

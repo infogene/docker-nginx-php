@@ -221,6 +221,35 @@ docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 | `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable (container must run as root) |
 | `USER_ID` / `GROUP_ID` | `www-data` uid/gid (remapped at build time, default 1000) |
 
+### PHP, PHP-FPM and Nginx settings
+
+Read at startup (`conf/php.ini`, `conf/php-fpm.conf`), override them with `-e`:
+
+| Variable | Setting | Default |
+|---|---|---|
+| `PHP_MEMORY_LIMIT` | `memory_limit` | `256M` |
+| `PHP_MAX_EXECUTION_TIME` | `max_execution_time` | `60` |
+| `PHP_POST_MAX_SIZE` | `post_max_size` | `10M` |
+| `PHP_UPLOAD_MAX_FILESIZE` | `upload_max_filesize` | `10M` |
+| `PHP_DATE_TIMEZONE` | `date.timezone` | `Europe/Paris` |
+| `PHP_OPCACHE_VALIDATE_TIMESTAMPS` | `opcache.validate_timestamps` (`0` when the code never changes at runtime) | `1` |
+| `PHP_OPCACHE_PRELOAD` | `opcache.preload` (e.g. `/application/config/preload.php`) | *(none)* |
+| `PHP_PCOV_ENABLED` | `pcov.enabled`: code coverage driver, loaded but inactive by default | `0` |
+| `PHP_FPM_PM` | `pm` | `dynamic` |
+| `PHP_FPM_PM_MAX_CHILDREN` | `pm.max_children`: size it as container memory / memory of one worker | `5` |
+| `PHP_FPM_PM_START_SERVERS` | `pm.start_servers` | `2` |
+| `PHP_FPM_PM_MIN_SPARE_SERVERS` | `pm.min_spare_servers` | `1` |
+| `PHP_FPM_PM_MAX_SPARE_SERVERS` | `pm.max_spare_servers` | `3` |
+| `PHP_FPM_PM_MAX_REQUESTS` | `pm.max_requests`: recycle workers (memory leaks) | `500` |
+| `NGINX_CLIENT_MAX_BODY_SIZE` | Nginx `client_max_body_size` | `PHP_POST_MAX_SIZE` |
+
+## Health check
+
+The image declares a `HEALTHCHECK` (`docker-healthcheck`): when the default backend
+(Nginx + PHP-FPM) was started, Nginx must answer `GET /healthz`, which PHP-FPM serves
+itself (`ping`) without running the application. Containers without Nginx (cron, workers, `--cli`, custom
+backend command) are reported healthy. `/healthz` is therefore reserved by the vhost.
+
 ## Ports
 
 | Port | Service |
