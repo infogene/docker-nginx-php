@@ -45,7 +45,7 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 | nginx vhost dest | `/etc/nginx/http.d/default.conf` | `/etc/nginx/conf.d/default.conf` |
 | nginx pid file | `/run/nginx/nginx.pid` | `/run/nginx.pid` |
 | node tarball | unofficial-builds `-musl` | nodejs.org glibc |
-| pnpm tarball (+ its sha256) | `pnpm-linux-x64-musl` | `pnpm-linux-x64` |
+| `strip` for node | temporary `binutils` (`.strip-deps`) | already in the base (`$PHPIZE_DEPS`) |
 | package mgr | `apk` | `apt` |
 
 **Non-root by design.** The image runs as `USER www-data` (uid/gid 1000). nginx binds privileged-port-capable via `setcap cap_net_bind_service`, but the vhost listens on **8080** (not 80). `bin/docker-setup-www-user` runs at *build* time (as root, before `USER www-data`) and recreates www-data with `USER_ID`/`GROUP_ID`. Those are `ENV` (default 1000), not `ARG`, so remapping to a host uid means a derived image that sets them and re-runs the script as root.
@@ -78,6 +78,16 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 **Runtime env vars** read by the entrypoint: `APP_ENV` (dev/prod), `APP_BOOT_CMD` (same as `--boot-cmd`), and the boolean (`1`/`true`) or list vars applied during setup, before the boot command: `APP_BOOT_PHP_XDEBUG_ENABLED`, `APP_BOOT_PHP_EXT_ENABLED` (space-separated, root only — warns otherwise), `APP_BOOT_PERMS_FLUSH` (runs `docker-permissions-flush`, dies on failure). `APP_DIR` defaults to `/application`.
 
 **nginx vhost** (`conf/nginx.vhost.conf`) is Symfony-shaped: front controller is `/application/public/index.php`, only `index.php` may execute PHP (all other `.php` → 404), `fastcgi_pass 127.0.0.1:9000`, `client_max_body_size 10M`.
+
+## Image size
+
+- `.dockerignore` is an allowlist (`bin/`, `conf/`, `src/`): a new directory the Dockerfiles `COPY` must be added there.
+- Files deleted in a later layer still weigh in the image: clean up in the same `RUN` that creates them (npm cache, `/tmp/node-compile-cache`, apt lists; `apk add --no-cache`, no `apk update`).
+- Node is trimmed at install: headers/docs removed, binary `strip`ped. pnpm comes from npm (4 MB) rather than its standalone binary (62 MB, bundles its own Node).
+- Alpine: `'!python3-pyc'` in `/etc/apk/world` forbids the Python bytecode packages supervisor would pull in.
+- Debian: `/etc/dpkg/dpkg.cfg.d/mariadb-client-trim` path-excludes the rarely used ~5 MB mariadb tools (binlog, slap, conv, plugin, tzinfo-to-sql, waitpid, perror, replace, resolve_stack_dump). To get one back: delete that file and `apt install --reinstall mariadb-client`.
+- Debian's base `php:*-fpm` keeps `$PHPIZE_DEPS` (gcc/g++/binutils, ~300 MB) in its own layers; only flattening the image could reclaim it (deliberately not done: loses shared base layers and base metadata).
+- Measure with the sum of `docker history` layer sizes: with the containerd image store, `docker image inspect .Size` also counts the compressed blobs.
 
 ## CI/CD
 

@@ -19,7 +19,13 @@ ENV APP_NAME='APP'
 WORKDIR $APP_DIR
 
 # Install packages
-RUN apt update --yes -q && \
+## mariadb-client ships every tool as a separate ~5 MB binary: a dpkg path-exclude skips the rarely used ones
+## (~45 MB), keeping mariadb/mysql, mariadb-dump/mysqldump, -admin, -import, -check and -show.
+RUN printf 'path-exclude=/usr/bin/%s\n' \
+        mariadb-binlog mariadb-conv mariadb-plugin mariadb-slap mariadb-tzinfo-to-sql mariadb-waitpid \
+        perror replace resolve_stack_dump \
+        > /etc/dpkg/dpkg.cfg.d/mariadb-client-trim && \
+    apt update --yes -q && \
     apt install --no-install-recommends --yes -q \
     sudo make curl wget zip nano git openssl nginx bash figlet supervisor mariadb-client && \
     apt autoremove -yq && apt autoclean -yq && rm -rf /var/lib/apt/lists/*
@@ -44,23 +50,19 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
     install-php-extensions  @composer
 
 
-## Install node, npm, yarn + mjml (no standalone mjml binary exists, so it comes from npm)
+## Install node, npm, yarn, pnpm + mjml
+## Node headers/docs are dropped (no native addon builds rely on them: node-gyp downloads its own) and the
+## node binary is stripped of debug symbols (~18 MB).
+ARG PNPM_VERSION='12.8.1'
 ARG MJML_VERSION='4.18.0'
 RUN curl -fsSL https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz -o /tmp/node-v24.21.0-linux-x64.tar.xz  && \
     tar -xJf /tmp/node-v24.21.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
     rm /tmp/node-v24.21.0-linux-x64.tar.xz && \
-    npm install --global yarn mjml@${MJML_VERSION} && \
-    npm cache clean --force
-
-## Install pnpm (standalone binary, alongside yarn)
-ARG PNPM_VERSION='12.8.1'
-ARG PNPM_SHA256='db3906881f63e41b655e3b97d473603dc26326c2470d0b1b8083689e1bcbd1e8'
-RUN curl -fsSL https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-x64.tar.gz -o /tmp/pnpm.tar.gz && \
-    echo "${PNPM_SHA256}  /tmp/pnpm.tar.gz" | sha256sum -c - && \
-    mkdir -p /usr/local/lib/pnpm && \
-    tar -xzf /tmp/pnpm.tar.gz -C /usr/local/lib/pnpm --no-same-owner && \
-    ln -s /usr/local/lib/pnpm/pnpm /usr/local/bin/pnpm && \
-    rm /tmp/pnpm.tar.gz
+    rm -rf /usr/local/include/node /usr/local/share/doc/node /usr/local/share/man/man1/node.1 /usr/local/CHANGELOG.md /usr/local/README.md && \
+    strip /usr/local/bin/node && \
+    npm install --global yarn pnpm@${PNPM_VERSION} mjml@${MJML_VERSION} && \
+    npm cache clean --force && \
+    rm -rf /tmp/node-compile-cache
 
 ## Install supercronic: cron runner for containers (runs jobs as the current user, logs to stdout)
 ARG SUPERCRONIC_VERSION='v0.2.49'

@@ -19,9 +19,9 @@ ENV APP_NAME='APP'
 WORKDIR $APP_DIR
 
 # Install packages
-RUN apk update && \
-    apk add --update --no-cache \
-    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client
+## `!python3-pyc` forbids the precompiled Python bytecode packages (~17 MB) that supervisor would pull in
+RUN apk add --no-cache \
+    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client '!python3-pyc'
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
@@ -42,23 +42,21 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
     install-php-extensions  xdebug && \
     install-php-extensions  @composer
 
-## Install node, npm, yarn + mjml (no standalone mjml binary exists, so it comes from npm)
+## Install node, npm, yarn, pnpm + mjml
+## Node headers/docs are dropped (no native addon builds rely on them: node-gyp downloads its own) and the
+## node binary is stripped of debug symbols (~18 MB).
+ARG PNPM_VERSION='12.8.1'
 ARG MJML_VERSION='4.18.0'
 RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-linux-x64-musl.tar.xz -o /tmp/node-v24.21.0-linux-x64.tar.xz  && \
     tar -xJf /tmp/node-v24.21.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
     rm /tmp/node-v24.21.0-linux-x64.tar.xz && \
-    npm install --global yarn mjml@${MJML_VERSION} && \
-    npm cache clean --force
-
-## Install pnpm (standalone binary, alongside yarn)
-ARG PNPM_VERSION='12.8.1'
-ARG PNPM_SHA256='f0a2db13d0a1b63c0053a5ddcfbf5c454b040e7ef54ca8771750e2cb55b86693'
-RUN curl -fsSL https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-x64-musl.tar.gz -o /tmp/pnpm.tar.gz && \
-    echo "${PNPM_SHA256}  /tmp/pnpm.tar.gz" | sha256sum -c - && \
-    mkdir -p /usr/local/lib/pnpm && \
-    tar -xzf /tmp/pnpm.tar.gz -C /usr/local/lib/pnpm --no-same-owner && \
-    ln -s /usr/local/lib/pnpm/pnpm /usr/local/bin/pnpm && \
-    rm /tmp/pnpm.tar.gz
+    rm -rf /usr/local/include/node /usr/local/share/doc/node /usr/local/share/man/man1/node.1 /usr/local/CHANGELOG.md /usr/local/README.md && \
+    apk add --no-cache --virtual .strip-deps binutils && \
+    strip /usr/local/bin/node && \
+    apk del --no-network .strip-deps && \
+    npm install --global yarn pnpm@${PNPM_VERSION} mjml@${MJML_VERSION} && \
+    npm cache clean --force && \
+    rm -rf /tmp/node-compile-cache
 
 ## Install supercronic: cron runner for containers (runs jobs as the current user, logs to stdout)
 ARG SUPERCRONIC_VERSION='v0.2.49'
