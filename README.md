@@ -36,7 +36,7 @@ Image: [`ghcr.io/infogene/nginx-php`](https://github.com/infogene/docker-nginx-p
 - **Supervisor** as the process supervisor (PID 1): automatic restart, clean
   shutdown, logs to `stdout`/`stderr`.
 - Common PHP extensions preinstalled (`opcache`, `apcu`, `redis`, `intl`, `pdo_*`,
-  `zip`, `xdebug` disabled by default…), **Composer**, **Node 24** + **Yarn**.
+  `zip`, `xdebug` disabled by default…), **Composer**, **Node 24**, **Yarn**, **pnpm** and **MJML** (`mjml` CLI).
 - **Option-driven** entrypoint: backend / frontend / cron / worker / CLI, with
   overridable commands.
 
@@ -101,7 +101,7 @@ default command is `--start-backend --mode-prod`.
 | `--start-backend [CMD]` | Nginx + PHP-FPM | `php-fpm -F` + `nginx -g "daemon off;"` |
 | `--start-frontend [CMD]` | Frontend server | `yarn --cwd frontend <env>` |
 | `--start-all` | Backend **and** frontend | (their defaults) |
-| `--start-cron` | Cron daemon | `www-data` crontab |
+| `--start-cron` | Cron jobs ([supercronic](https://github.com/aptible/supercronic)) | `www-data` crontab |
 
 `--start-backend` and `--start-frontend` accept an **optional command** that
 **overrides** the default startup:
@@ -120,9 +120,14 @@ docker run -d -p 8080:8080 -v "$PWD:/application" \
 Backend and frontend are registered as **separate** Supervisor programs: each is
 restarted independently.
 
+For a pnpm-based frontend, override the default Yarn command, e.g.
+`--start-frontend "pnpm --dir frontend run dev"`.
+
 ### Cron
 
-Provide your crontab and start cron mode (Nginx / PHP-FPM do not start):
+Provide your crontab and start cron mode (Nginx / PHP-FPM do not start). Jobs are
+run by [supercronic](https://github.com/aptible/supercronic) as `www-data` (no root
+needed), and their output goes to the container logs:
 
 ```shell
 docker run -d --name my-cron -v "$PWD:/application" \
@@ -193,8 +198,8 @@ docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 | `APP_ENV` | `dev` / `prod` (determines the mode when no `--mode-*` option) |
 | `APP_BOOT_CMD` | Command run at startup (equivalent to `--boot-cmd`) |
 | `APP_BOOT_PERMS_FLUSH` | If `true`, adjusts `/application` permissions (775, group `www-data`) |
-| `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug |
-| `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable |
+| `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug (container must run as root) |
+| `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable (container must run as root) |
 | `USER_ID` / `GROUP_ID` | `www-data` uid/gid (remapped at build time, default 1000) |
 
 ## Ports

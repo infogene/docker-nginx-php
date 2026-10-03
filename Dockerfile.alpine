@@ -19,9 +19,9 @@ ENV APP_NAME='APP'
 WORKDIR $APP_DIR
 
 # Install packages
-RUN apk update && \
-    apk add --update --no-cache \
-    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client
+## `!python3-pyc` forbids the precompiled Python bytecode packages (~17 MB) that supervisor would pull in
+RUN apk add --no-cache \
+    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client '!python3-pyc'
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
 RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
@@ -42,11 +42,28 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
     install-php-extensions  xdebug && \
     install-php-extensions  @composer
 
-## Install node, npm + yarn
+## Install node, npm, yarn, pnpm + mjml
+## Node headers/docs are dropped (no native addon builds rely on them: node-gyp downloads its own) and the
+## node binary is stripped of debug symbols (~18 MB).
+ARG PNPM_VERSION='12.8.1'
+ARG MJML_VERSION='4.18.0'
 RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-linux-x64-musl.tar.xz -o /tmp/node-v24.21.0-linux-x64.tar.xz  && \
     tar -xJf /tmp/node-v24.21.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
     rm /tmp/node-v24.21.0-linux-x64.tar.xz && \
-    npm install --global yarn
+    rm -rf /usr/local/include/node /usr/local/share/doc/node /usr/local/share/man/man1/node.1 /usr/local/CHANGELOG.md /usr/local/README.md && \
+    apk add --no-cache --virtual .strip-deps binutils && \
+    strip /usr/local/bin/node && \
+    apk del --no-network .strip-deps && \
+    npm install --global yarn pnpm@${PNPM_VERSION} mjml@${MJML_VERSION} && \
+    npm cache clean --force && \
+    rm -rf /tmp/node-compile-cache
+
+## Install supercronic: cron runner for containers (runs jobs as the current user, logs to stdout)
+ARG SUPERCRONIC_VERSION='v0.2.49'
+ARG SUPERCRONIC_SHA256='a53ae236602c7338aba3fbaff40bda6300eae3b9fedb8261eb06cfe3724430c1'
+RUN curl -fsSL https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64 -o /usr/local/bin/supercronic && \
+    echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - && \
+    chmod +x /usr/local/bin/supercronic
 
 ## Copy App
 COPY ./ /usr/local/share/application-src
@@ -59,6 +76,7 @@ RUN chmod +x /usr/local/bin/* && \
     cp /usr/local/share/application-src/conf/supervisord.conf /etc/supervisor/supervisord.conf && \
     cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/http.d/default.conf && \
     cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
+    mkdir -p /var/spool/cron/crontabs && \
     cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
     cp -rpf /usr/local/share/application-src/src/* ${APP_DIR} && \
     mkdir -p /var/www && \

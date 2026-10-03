@@ -1,0 +1,5 @@
+# Only what the Dockerfiles copy: everything else (.git, docs, IDE files…) stays out of the build context
+*
+!bin/
+!conf/
+!src/
