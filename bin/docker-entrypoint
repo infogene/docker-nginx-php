@@ -76,6 +76,15 @@ die() {
 }
 
 #######################################
+# Check whether a value is truthy (1 or true)
+# Arguments:
+#   Value to check
+#######################################
+is_true() {
+  [[ "${1:-}" =~ ^(1|true)$ ]]
+}
+
+#######################################
 # Print usage information
 #######################################
 usage() {
@@ -95,7 +104,8 @@ OPTIONS:
   --enable-xdebug         Explicitly enable xdebug
 
   Service Options:
-  --start-cron            Start cron service only
+  --start-cron            Run the www-data crontab (/var/spool/cron/crontabs/www-data)
+                          with supercronic, no other service
   --start-backend [CMD]   Start backend. Default: Nginx + PHP-FPM.
                           Optional CMD overrides it, e.g.
                           --start-backend "php -S 0.0.0.0:8080 -t /application/public"
@@ -119,8 +129,11 @@ ARGUMENTS:
   and all options will be ignored (passthrough mode).
 
 ENVIRONMENT VARIABLES:
-  APP_ENV                 Application environment (dev/prod)
-  APP_BOOT_CMD            Default boot command
+  APP_ENV                       Application environment (dev/prod)
+  APP_BOOT_CMD                  Default boot command
+  APP_BOOT_PERMS_FLUSH          If 1/true, adjust /application permissions at startup
+  APP_BOOT_PHP_XDEBUG_ENABLED   If 1/true, enable xdebug (requires root)
+  APP_BOOT_PHP_EXT_ENABLED      Space-separated PHP extensions to enable (requires root)
 
 EXAMPLES:
   # Start in production mode with backend only
@@ -245,6 +258,10 @@ parse_params() {
     fi
   fi
 
+  if is_true "${APP_BOOT_PHP_XDEBUG_ENABLED:-}"; then
+    ENABLE_XDEBUG=1
+  fi
+
   # Mode-specific settings
   if [[ $MODE_DEV -eq 1 ]]; then
     MODE_PROD=0
@@ -261,12 +278,43 @@ parse_params() {
 #######################################
 enable_xdebug() {
   [[ $ENABLE_XDEBUG -eq 0 ]] && return 0
-  [[ $(id -u) -ne 0 ]] && return 0
+
+  if [[ $(id -u) -ne 0 ]]; then
+    msg "${YELLOW}  ⚠ xdebug not enabled: requires running the container as root${NOFORMAT}"
+    return 0
+  fi
 
   if ! php -m | grep -q "xdebug"; then
     msg "${CYAN}  ↳ Enabling xdebug...${NOFORMAT}"
     docker-php-ext-enable xdebug &>/dev/null || die "Failed to enable xdebug"
   fi
+}
+
+#######################################
+# Enable the PHP extensions listed in APP_BOOT_PHP_EXT_ENABLED
+#######################################
+enable_php_extensions() {
+  [[ -z "${APP_BOOT_PHP_EXT_ENABLED:-}" ]] && return 0
+
+  if [[ $(id -u) -ne 0 ]]; then
+    msg "${YELLOW}  ⚠ PHP extensions (${APP_BOOT_PHP_EXT_ENABLED}) not enabled: requires running the container as root${NOFORMAT}"
+    return 0
+  fi
+
+  msg "${CYAN}  ↳ Enabling PHP extensions (${APP_BOOT_PHP_EXT_ENABLED})...${NOFORMAT}"
+  # shellcheck disable=SC2086 # space-separated list, split on purpose
+  docker-php-ext-enable ${APP_BOOT_PHP_EXT_ENABLED} &>/dev/null \
+    || die "Failed to enable PHP extensions: ${APP_BOOT_PHP_EXT_ENABLED}"
+}
+
+#######################################
+# Adjust /application permissions when APP_BOOT_PERMS_FLUSH is set
+#######################################
+flush_permissions() {
+  is_true "${APP_BOOT_PERMS_FLUSH:-}" || return 0
+
+  msg "${CYAN}  ↳ Adjusting /application permissions...${NOFORMAT}"
+  docker-permissions-flush || die "Permissions flush failed"
 }
 
 #######################################
@@ -329,18 +377,19 @@ run_cli_mode() {
 
 #######################################
 # Start cron service
+# Runs the www-data crontab with supercronic: unlike crond/cron it needs no root
+# (no user switch per job), reads the file whatever its mode, and logs jobs to
+# stdout/stderr.
 #######################################
 start_cron() {
   [[ $START_CRON -eq 0 ]] && return 0
 
-  msg "${GREEN}  ↳ Starting cron service...${NOFORMAT}"
+  local crontab_file="/var/spool/cron/crontabs/www-data"
+  [[ -r "$crontab_file" ]] || die "Crontab not found or not readable: ${crontab_file}"
 
-  # Display crontab
-  if crontab -u www-data -l 2>/dev/null; then
-    echo ""
-  fi
+  msg "${GREEN}  ↳ Starting cron service (supercronic)...${NOFORMAT}"
 
-  exec /usr/sbin/crond -f
+  exec docker-exec-www-data supercronic "$crontab_file"
 }
 
 #######################################
@@ -428,6 +477,8 @@ main() {
 
   # Setup phase
   enable_xdebug
+  enable_php_extensions
+  flush_permissions
   setup_dev_mode
   setup_prod_mode
   run_boot_command
