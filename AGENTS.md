@@ -48,7 +48,7 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 | `strip` for node | temporary `binutils` (`.strip-deps`) | already in the base (`$PHPIZE_DEPS`) |
 | package mgr | `apk` | `apt` |
 
-**Non-root by design.** The image runs as `USER www-data` (uid/gid 1000). nginx binds privileged-port-capable via `setcap cap_net_bind_service`, but the vhost listens on **8080** (not 80). `bin/docker-setup-www-user` runs at *build* time (as root, before `USER www-data`) and recreates www-data with `USER_ID`/`GROUP_ID`. Those are `ENV` (default 1000), not `ARG`, so remapping to a host uid means a derived image that sets them and re-runs the script as root.
+**Non-root by design.** The image runs as `USER www-data` (uid/gid 1000) and the vhost listens on **8080**. No binary carries file capabilities and there is no `sudo` (nor any setuid helper of ours): when the container runs as root, `docker-exec-www-data` drops to www-data with `setpriv`. Ports < 1024 therefore need root (or `--sysctl net.ipv4.ip_unprivileged_port_start=0`). `bin/docker-setup-www-user` runs at *build* time (as root, before `USER www-data`) and recreates www-data with `USER_ID`/`GROUP_ID`. Those are `ENV` (default 1000), not `ARG`, so remapping to a host uid means a derived image that sets them and re-runs the script as root.
 
 **Entrypoint = a flag-driven launcher that runs everything under Supervisor.** `bin/docker-entrypoint` (the active one) parses CLI flags into mode/service variables, runs setup → boot-cmd, then either execs a one-off (CLI/cron/passthrough) or **registers service programs and hands off to a single `supervisord` (PID 1)** via `bin/docker-supervisor-cli`. Key behaviors:
 - Modes are mutually exclusive: `--mode-dev` forces xdebug on and `APP_ENV=dev`; `--mode-prod` is the default. With neither flag, `APP_ENV` env var decides.
@@ -66,21 +66,25 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 
 **`bin/docker-supervisor-cli`** generates `/tmp/supervisord.conf` (path overridable via `SUPERVISORD_CONF`) from `--supervisor-*` args, then `exec supervisord`. The `[supervisord]` section is `nodaemon=true` + `logfile=/dev/null`/`logfile_maxbytes=0` + `pidfile=/tmp/supervisord.pid` — supervisord never writes into the cwd (`/application`), so the image works under a **read-only root filesystem** and doesn't litter the app dir. It escapes `%` in commands (supervisord would parse it as a format string) and, unless `SUPERVISOR_EXIT_ON_FATAL=false`, adds `[eventlistener:fatal-listener]` (`bin/docker-supervisor-fatal-listener`) which stops supervisord when a program enters `FATAL`, so the container exits instead of running without that service. Every program gets defaults (`autostart`/`autorestart`/`stopasgroup`/`killasgroup=true`, `user=$(id -un)` — the user the container was launched as, so `--user 0` runs programs as root —, logs → `/dev/stdout`/`/dev/stderr`, `*_logfile_maxbytes=0` so `/dev/stdout` is accepted). Used both internally (backend/frontend) and directly (`--start-supervisor-cli`).
 
-**Hardening note (read-only / `cap_drop`).** nginx carries a `cap_net_bind_service` file capability (`setcap`, see Dockerfiles). Two consequences for hardened compose setups: (1) under `cap_drop: ALL` you must `cap_add: NET_BIND_SERVICE` or nginx `execve()` fails with EPERM even on 8080; (2) `no-new-privileges` is incompatible with the setcap'd nginx. Backends without file caps (e.g. `php -S`) have neither limitation. For a read-only rootfs the writable paths are `/tmp`, `/run/nginx`, `/var/lib/nginx/tmp` (tmpfs, `mode=01777`); nginx logs are symlinked to stdout/stderr, so `/var/log/nginx` needs no tmpfs. See `docs/examples/production-hardened.yml` and `docs/examples/hardened-php-builtin.yml`.
+**Hardening note (read-only / `cap_drop`).** Running as www-data, every mode works with `cap_drop: ALL` (nothing added back) and `no-new-privileges`. Do not reintroduce `setcap` on nginx: a file capability makes `execve()` fail under `cap_drop: ALL` (unless re-added) and is refused under `no-new-privileges`. Running as root needs `SETUID`/`SETGID` (nginx workers, php-fpm pool and `setpriv` switch to www-data). For a read-only rootfs the writable paths are `/tmp`, `/run/nginx`, `/var/lib/nginx/tmp` (tmpfs, `mode=01777`); nginx logs are symlinked to stdout/stderr, so `/var/log/nginx` needs no tmpfs. See `docs/examples/production-hardened.yml` and `docs/examples/hardened-php-builtin.yml`.
 
 `conf/supervisord.conf` is still copied to `/etc/supervisor/supervisord.conf` but is **not used** by the current entrypoint (leftover from the removed per-service-config entrypoint variants).
 
 **`bin/` helper scripts** are all copied to `/usr/local/bin/` and on PATH inside the image:
 - `docker-supervisor-cli` — generates `supervisord.conf` from `--supervisor-*` args and execs supervisord (see entrypoint section above).
-- `docker-exec-www-data <cmd>` / `su-www-data` — drop to www-data via sudo when root, else run directly. Used throughout the entrypoint to run app/yarn/git commands.
+- `docker-exec-www-data <cmd>` / `su-www-data` — drop to www-data via `setpriv` when root (keeping the environment, `HOME` set), else run directly. Used throughout the entrypoint to run app/yarn/git commands.
 - `docker-phpmod-enable` / `docker-phpmod-disable` — wrap `docker-php-ext-enable` and comment out extension ini lines.
-- `docker-permissions-flush` — `chmod -R 775` + `chown -R :www-data /application`.
+- `docker-permissions-flush` — `chown -R :www-data` + `chmod -R g+rwX,o-w` on `/application`, setgid on directories (no blanket 775: files keep their own execute bit).
 - `docker-exec-cmd` — bare `exec "$@"` wrapper.
 - `docker-motd-sysinfo` / `docker-setup-motd` — shell login banner.
 
 **Runtime env vars** read by the entrypoint: `APP_ENV` (dev/prod), `APP_BOOT_CMD` (same as `--boot-cmd`), and the boolean (`1`/`true`) or list vars applied during setup, before the boot command: `APP_BOOT_PHP_XDEBUG_ENABLED`, `APP_BOOT_PHP_EXT_ENABLED` (space-separated, root only — warns otherwise), `APP_BOOT_PERMS_FLUSH` (runs `docker-permissions-flush`, dies on failure). `APP_DIR` defaults to `/application`.
 
 **nginx vhost** (`conf/nginx.vhost.conf`) is Symfony-shaped: front controller is `/application/public/index.php`, only `index.php` may execute PHP (all other `.php` → 404), `fastcgi_pass 127.0.0.1:9000`, `client_max_body_size 10M`.
+
+## Pinned versions and supply chain
+
+Every download is pinned through `ARG`s at the top of its `RUN`, and verified with a sha256 when the artifact is a raw download: `IPE_VERSION`/`IPE_SHA256` (install-php-extensions), `COMPOSER_VERSION`, `NODE_VERSION`/`NODE_SHA256` (different tarball, hence different sha, per variant), `YARN_VERSION`, `PNPM_VERSION`, `MJML_VERSION`, `SUPERCRONIC_VERSION`/`SUPERCRONIC_SHA256`. Bump them in both Dockerfiles together. PHP extensions themselves follow IPE's defaults for the pinned IPE version, and the `php:*-fpm-*` base is intentionally unpinned (the monthly scheduled rebuild picks up its security fixes). OCI labels (`org.opencontainers.image.*`) are declared last; CI passes `VCS_REF=$CI_COMMIT_SHA` for `org.opencontainers.image.revision`.
 
 ## Image size
 

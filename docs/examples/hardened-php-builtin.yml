@@ -1,9 +1,8 @@
 # Maximally-hardened backend using PHP's built-in web server (no Nginx).
 #
-# Because `php -S` carries no file capabilities (unlike the setcap'd nginx),
-# this backend can run under the strictest sandbox: ALL capabilities dropped
-# with NONE added back, no-new-privileges, and a read-only root filesystem with
-# a single writable tmpfs (/tmp). Verified to serve HTTP 200.
+# Same sandbox as production-hardened.yml (ALL capabilities dropped, none added
+# back, no-new-privileges, read-only root filesystem), but a single process:
+# only /tmp needs to be writable. Verified to serve HTTP 200.
 #
 # Trade-off: PHP's built-in server is single-threaded and meant for low-traffic
 # or internal services. For public production traffic prefer the Nginx + PHP-FPM

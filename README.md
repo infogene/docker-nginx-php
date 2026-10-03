@@ -216,7 +216,7 @@ docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 | `APP_ENV` | `dev` / `prod` (determines the mode when no `--mode-*` option) |
 | `APP_BOOT_CMD` | Command run at startup through `bash -c` (equivalent to `--boot-cmd`) |
 | `SUPERVISOR_EXIT_ON_FATAL` | `true` (default): stop the container when a supervised program enters `FATAL` |
-| `APP_BOOT_PERMS_FLUSH` | If `true`, adjusts `/application` permissions (775, group `www-data`) |
+| `APP_BOOT_PERMS_FLUSH` | If `true`, makes `/application` group-owned and group-writable by `www-data`, not world-writable (`g+rwX,o-w`, setgid directories) |
 | `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug (container must run as root) |
 | `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable (container must run as root) |
 | `USER_ID` / `GROUP_ID` | `www-data` uid/gid (remapped at build time, default 1000) |
@@ -256,8 +256,14 @@ Ready-to-run Docker Compose files are provided in
 - **`docker-supervisor-cli`** generates `supervisord.conf` from the `--supervisor-*`
   options and execs `supervisord`. It is used internally by `--start-backend` /
   `--start-frontend`, and directly via `--start-supervisor-cli`.
-- **Non-root**: the image runs as `www-data`; Nginx is granted the
-  `cap_net_bind_service` capability but the vhost listens on `8080`.
+- **Non-root**: the image runs as `www-data` and Nginx listens on `8080`. No
+  binary carries file capabilities and the image ships no `sudo`, so containers
+  can drop **all** capabilities and use `no-new-privileges`. When started as root,
+  services and commands drop to `www-data` with `setpriv`. Ports below 1024 need
+  root (or `--sysctl net.ipv4.ip_unprivileged_port_start=0`).
+- **Pinned downloads**: Composer, Node.js, Yarn, pnpm, MJML, supercronic and the
+  PHP extension installer are pinned (`ARG`s) and checksum-verified where
+  applicable.
 - **Variants**: `Dockerfile.alpine` (default, `Dockerfile` is a symlink to it) and
   `Dockerfile.debian`.
 

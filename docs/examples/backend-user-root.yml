@@ -1,5 +1,6 @@
-# Default backend: Nginx + PHP-FPM, supervised separately.
-# Serves /application/public through the Symfony-friendly vhost (fastcgi -> 127.0.0.1:9000).
+# Default backend (Nginx + PHP-FPM) with the container running as root.
+# Supervisor and the services then run as root; Nginx workers and PHP-FPM pool
+# workers switch to www-data, hence SETUID/SETGID.
 #
 #   docker compose -f backend-user-root.yml up
 #   -> http://localhost:8080
@@ -20,4 +21,3 @@ services:
       - CHOWN
       - SETGID
       - SETUID
-      - NET_BIND_SERVICE
