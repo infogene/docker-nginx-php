@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# Supervisor event listener (see docker-supervisor-cli): when a program enters the
+# FATAL state (it gave up restarting it), stop supervisord so the container exits
+# and the orchestrator can restart it, instead of leaving a running container
+# with a dead service.
+#
+# Protocol: stdout is reserved for supervisord (READY / RESULT), so all logging
+# goes to stderr. See http://supervisord.org/events.html#event-listener-notification-protocol
+
+set -uo pipefail
+
+# Payload length is given in bytes: read it byte-wise
+export LC_ALL=C
+
+while true; do
+  printf 'READY\n'
+
+  read -r header || exit 0
+  len="${header##*len:}"
+  len="${len%% *}"
+  read -r -N "$len" payload || exit 0
+
+  if [[ "$header" == *"eventname:PROCESS_STATE_FATAL"* ]]; then
+    name="${payload#*processname:}"
+    name="${name%% *}"
+    echo >&2 "FATAL: program '${name}' could not be (re)started, stopping supervisord"
+    kill -TERM "$PPID"
+  fi
+
+  printf 'RESULT 2\nOK'
+done

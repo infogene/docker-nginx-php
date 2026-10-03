@@ -19,8 +19,13 @@ services:
     ports:
       - "8080:8080"
 
-    # Restart automatically unless the operator stopped the container on purpose.
+    # Restart automatically unless the operator stopped the container on purpose
+    # (also covers the fail-fast exit when a supervised program enters FATAL).
     restart: unless-stopped
+
+    # Nginx and PHP-FPM finish in-flight requests on stop (up to 20 s): give them
+    # time before Docker's SIGKILL (default: 10 s).
+    stop_grace_period: 30s
 
     # Liveness probe: the orchestrator restarts the container if the vhost stops
     # answering. curl ships in the image; 8080 is the vhost port.
@@ -67,10 +72,6 @@ services:
       # nginx client_body / proxy / fastcgi / uwsgi / scgi temp dirs.
       - type: tmpfs
         target: /var/lib/nginx/tmp
-        tmpfs: { mode: 01777 }
-      # nginx access/error logs (also reached via the /var/lib/nginx/logs symlink).
-      - type: tmpfs
-        target: /var/log/nginx
         tmpfs: { mode: 01777 }
       # Mount your application here (otherwise the image's built-in phpinfo() is
       # served). Use :ro if your app does not write to its own source tree.

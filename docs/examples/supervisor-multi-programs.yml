@@ -2,7 +2,7 @@
 # yourself via repeatable --supervisor-program options. Here, Nginx and PHP-FPM
 # as two independent programs (equivalent to --start-backend, but explicit).
 #
-# Every other --supervisor-* option has a default (user=www-data,
+# Every other --supervisor-* option has a default (user=the container user,
 # autostart/autorestart=true, stop/kill-as-group=true, logs -> stdout/stderr).
 #
 #   docker compose -f supervisor-multi-programs.yml up

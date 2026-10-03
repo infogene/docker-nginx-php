@@ -94,7 +94,9 @@ docker run -d -p 8080:8080 -v "$PWD:/application" \
 ## Services: backend, frontend, cron
 
 The entrypoint starts the requested services under **Supervisor**. The image's
-default command is `--start-backend --mode-prod`.
+default command is `--start-backend --mode-prod`; when no service (nor `--cli`) is
+given, `--start-backend` is implied. `--cli`, `--start-cron` and the `--start-*`
+services are mutually exclusive, as are `--mode-dev` and `--mode-prod`.
 
 | Option | Starts | Default command |
 |---|---|---|
@@ -119,6 +121,17 @@ docker run -d -p 8080:8080 -v "$PWD:/application" \
 
 Backend and frontend are registered as **separate** Supervisor programs: each is
 restarted independently.
+
+- **Logs**: every service, Nginx access/error logs included, writes to the
+  container logs (`docker logs`).
+- **Graceful stop**: on `docker stop`, Nginx and PHP-FPM finish their in-flight
+  requests (up to 20 s) before exiting. Docker only waits 10 s by default: set
+  `stop_grace_period: 30s` (Compose) / `--stop-timeout 30` to give them the full
+  delay (Kubernetes already waits 30 s).
+- **Fail fast**: if a program cannot be (re)started (Supervisor `FATAL` state),
+  Supervisor stops and the container exits, so the orchestrator restarts it
+  instead of keeping a container without that service. Use a restart policy
+  (`restart: unless-stopped`), or set `SUPERVISOR_EXIT_ON_FATAL=false`.
 
 For a pnpm-based frontend, override the default Yarn command, e.g.
 `--start-frontend "pnpm --dir frontend run dev"`.
@@ -164,7 +177,7 @@ command:
 | `--supervisor-startretries N` | `startretries` | `3` |
 | `--supervisor-stopasgroup BOOL` | `stopasgroup` | `true` |
 | `--supervisor-killasgroup BOOL` | `killasgroup` | `true` |
-| `--supervisor-user USER` | `user` | `www-data` |
+| `--supervisor-user USER` | `user` | the container user (`www-data`) |
 | `--supervisor-stdout-logfile PATH` | `stdout_logfile` | `/dev/stdout` |
 | `--supervisor-stderr-logfile PATH` | `stderr_logfile` | `/dev/stderr` |
 
@@ -174,14 +187,19 @@ programs); after a `--supervisor-program` → overrides **that** program.
 **Extensible**: any `--supervisor-<a>-<b> VALUE` option becomes `a_b=VALUE`
 (e.g. `--supervisor-numprocs 4` → `numprocs=4`).
 
+Commands are taken **literally** (`%` is escaped for Supervisor), so they can
+contain `%` (e.g. `date +%F`); Supervisor's `%(...)s` expansions remain available
+in the other directives.
+
 > `user` must match the container's current user (`www-data` by default); to
 > supervise a different user, run the container as root (`--user 0`).
 
 ## Other executions
 
 ```shell
-# Single command then exit (no services)
-docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest --cli "php -v"
+# Single command then exit (no services), run through `bash -c` (quotes, pipes, && work)
+docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest \
+  --cli "php -r 'echo PHP_VERSION;' && composer --version"
 
 # Command at startup, before services
 docker run -d -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest \
@@ -196,7 +214,8 @@ docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 | Variable | Effect |
 |---|---|
 | `APP_ENV` | `dev` / `prod` (determines the mode when no `--mode-*` option) |
-| `APP_BOOT_CMD` | Command run at startup (equivalent to `--boot-cmd`) |
+| `APP_BOOT_CMD` | Command run at startup through `bash -c` (equivalent to `--boot-cmd`) |
+| `SUPERVISOR_EXIT_ON_FATAL` | `true` (default): stop the container when a supervised program enters `FATAL` |
 | `APP_BOOT_PERMS_FLUSH` | If `true`, adjusts `/application` permissions (775, group `www-data`) |
 | `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug (container must run as root) |
 | `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable (container must run as root) |

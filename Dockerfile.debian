@@ -82,6 +82,7 @@ RUN chmod +x /usr/local/bin/* && \
     cp /usr/local/share/application-src/conf/supervisord.conf /etc/supervisor/supervisord.conf && \
     cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/conf.d/default.conf && \
     cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
+    cp /usr/local/share/application-src/conf/php-fpm.conf /usr/local/etc/php-fpm.d/zz-nginx-php.conf && \
     mkdir -p /var/spool/cron/crontabs && \
     cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
     cp -rpf /usr/local/share/application-src/src/* ${APP_DIR} && \
@@ -91,15 +92,18 @@ RUN chmod +x /usr/local/bin/* && \
     touch /var/log/cron.log && \
     chown -R www-data:www-data /var/spool/cron/crontabs/www-data && \
     chown -R :www-data /var/log/cron.log && \
-    mkdir -p /var/lib/nginx /var/log/nginx && \
+    mkdir -p /var/lib/nginx/tmp /var/log/nginx /run/nginx && \
     chown -R www-data:root /var/lib/nginx && \
     chown -R www-data:root /var/log/nginx && \
     chmod -R 775 /var/lib/nginx && \
     chmod -R 775 /var/log/nginx && \
-    touch /run/nginx.pid && \
-    chown www-data:root /run/nginx.pid && \
-    chmod 775 /run/nginx.pid && \
-    sed -i 's/^user www-data;/#user www-data;/' /etc/nginx/nginx.conf || true && \
+    # nginx logs go to the container logs \
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log && \
+    # pid in /run/nginx like on Alpine (one tmpfs for read-only root filesystems) \
+    chown www-data:root /run/nginx && \
+    chmod 775 /run/nginx && \
+    sed -i -e 's/^user www-data;/#user www-data;/' -e 's|^pid /run/nginx.pid;|pid /run/nginx/nginx.pid;|' /etc/nginx/nginx.conf && \
     #Grant nginx capability to bind privileged ports && \
     setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
