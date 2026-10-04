@@ -66,11 +66,15 @@ docker run --rm "$IMAGE" ls -ld / >/dev/null || fail "passthrough of a command w
 user="$(docker run --rm "$IMAGE" whoami)"
 [ "$user" = www-data ] || fail "the image runs as $user instead of www-data"
 
-echo "==> cli: docker-phpmod-disable / docker-phpmod-enable (root)"
+echo "==> cli: docker-phpmod-enable / docker-phpmod-disable (root)"
+# xdebug: a shared zend_extension, installed but disabled in every variant
+# (not opcache: PHP >= 8.5 compiles it in, it cannot be disabled)
 docker run --rm --user 0 "$IMAGE" sh -c '
-    docker-phpmod-disable opcache && ! php -m | grep -qx "Zend OPcache" &&
-    docker-phpmod-enable opcache && php -m | grep -qx "Zend OPcache"' >/dev/null \
-    || fail "docker-phpmod-disable / docker-phpmod-enable did not toggle opcache"
+    docker-phpmod-enable xdebug >/dev/null || exit 1
+    php -m | grep -qx xdebug || { echo "docker-phpmod-enable did not load xdebug" >&2; exit 1; }
+    docker-phpmod-disable xdebug || exit 1
+    ! php -m | grep -qx xdebug || { echo "docker-phpmod-disable did not unload xdebug" >&2; exit 1; }' \
+    || fail "docker-phpmod-enable / docker-phpmod-disable"
 
 check_backend default "$IMAGE"
 

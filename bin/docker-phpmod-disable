@@ -3,7 +3,8 @@ set -e
 
 #
 ## Disable PHP extension MOD: comment out the extension= / zend_extension= lines
-## of the additional ini files whose path matches MOD (e.g. opcache, xdebug).
+## of the additional ini files whose path matches MOD (e.g. xdebug, apcu; not
+## opcache on PHP >= 8.5, which compiles it in).
 PHP_MOD=$1
 
 if [ -n "${PHP_MOD}" ]; then
