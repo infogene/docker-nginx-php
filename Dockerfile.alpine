@@ -4,9 +4,6 @@ ARG APP_ENV='prod'
 
 FROM php:${PHP_VERSION}-fpm-${DEB_VERSION}
 
-LABEL application.mode='production'
-LABEL maintainer='mZammouri <mohamed.zammouri@infogene.fr>'
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV USER_ID=1000
 ENV GROUP_ID=1000
@@ -21,10 +18,14 @@ WORKDIR $APP_DIR
 # Install packages
 ## `!python3-pyc` forbids the precompiled Python bytecode packages (~17 MB) that supervisor would pull in
 RUN apk add --no-cache \
-    sudo make curl wget zip nano git openssl nginx bash figlet libcap supervisor mariadb-client '!python3-pyc'
+    make curl wget zip nano git openssl nginx bash figlet setpriv supervisor mariadb-client '!python3-pyc'
 
 ## Docker php ext installer : Better install with https://github.com/mlocati/docker-php-extension-installer
-RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o /usr/local/bin/install-php-extensions && \
+ARG IPE_VERSION='2.12.0'
+ARG IPE_SHA256='3f49c71fa66c79b8b2b96bc0ce92885dafd7946f3b5a46f545b390d6f1617e2c'
+ARG COMPOSER_VERSION='2.10.3'
+RUN curl -fsSL https://github.com/mlocati/docker-php-extension-installer/releases/download/${IPE_VERSION}/install-php-extensions -o /usr/local/bin/install-php-extensions && \
+    echo "${IPE_SHA256}  /usr/local/bin/install-php-extensions" | sha256sum -c - && \
     chmod +x /usr/local/bin/install-php-extensions && \
     install-php-extensions \
         apcu \
@@ -40,21 +41,25 @@ RUN curl -sSL https://github.com/mlocati/docker-php-extension-installer/releases
         pdo_mysql && \
     IPE_DONT_ENABLE=1 \
     install-php-extensions  xdebug && \
-    install-php-extensions  @composer
+    install-php-extensions  @composer-${COMPOSER_VERSION}
 
 ## Install node, npm, yarn, pnpm + mjml
 ## Node headers/docs are dropped (no native addon builds rely on them: node-gyp downloads its own) and the
 ## node binary is stripped of debug symbols (~18 MB).
+ARG NODE_VERSION='24.21.0'
+ARG NODE_SHA256='dd5ca647e656c8200c873f45098a16623129c47f2387829f0a15a6de1dac1220'
+ARG YARN_VERSION='1.22.22'
 ARG PNPM_VERSION='12.8.1'
 ARG MJML_VERSION='4.18.0'
-RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-linux-x64-musl.tar.xz -o /tmp/node-v24.21.0-linux-x64.tar.xz  && \
-    tar -xJf /tmp/node-v24.21.0-linux-x64.tar.xz  -C /usr/local --strip-components=1 --no-same-owner  && \
-    rm /tmp/node-v24.21.0-linux-x64.tar.xz && \
+RUN curl -fsSL https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64-musl.tar.xz -o /tmp/node.tar.xz && \
+    echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner && \
+    rm /tmp/node.tar.xz && \
     rm -rf /usr/local/include/node /usr/local/share/doc/node /usr/local/share/man/man1/node.1 /usr/local/CHANGELOG.md /usr/local/README.md && \
     apk add --no-cache --virtual .strip-deps binutils && \
     strip /usr/local/bin/node && \
     apk del --no-network .strip-deps && \
-    npm install --global yarn pnpm@${PNPM_VERSION} mjml@${MJML_VERSION} && \
+    npm install --global yarn@${YARN_VERSION} pnpm@${PNPM_VERSION} mjml@${MJML_VERSION} && \
     npm cache clean --force && \
     rm -rf /tmp/node-compile-cache
 
@@ -76,6 +81,7 @@ RUN chmod +x /usr/local/bin/* && \
     cp /usr/local/share/application-src/conf/supervisord.conf /etc/supervisor/supervisord.conf && \
     cp /usr/local/share/application-src/conf/nginx.vhost.conf /etc/nginx/http.d/default.conf && \
     cp /usr/local/share/application-src/conf/php.ini /usr/local/etc/php/conf.d/php.ini && \
+    cp /usr/local/share/application-src/conf/php-fpm.conf /usr/local/etc/php-fpm.d/zz-nginx-php.conf && \
     mkdir -p /var/spool/cron/crontabs && \
     cp /usr/local/share/application-src/conf/crontab /var/spool/cron/crontabs/www-data && \
     cp -rpf /usr/local/share/application-src/src/* ${APP_DIR} && \
@@ -90,21 +96,50 @@ RUN chmod +x /usr/local/bin/* && \
     chown -R www-data:root /var/log/nginx && \
     chmod -R 775 /var/lib/nginx && \
     chmod -R 775 /var/log/nginx && \
+    # nginx logs go to the container logs \
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log && \
     touch /run/nginx/nginx.pid && \
     chown -R www-data:root /run/nginx && \
     chmod -R 775 /run/nginx/nginx.pid && \
-    sed -i 's/^user nginx;/#user nginx;/' /etc/nginx/nginx.conf || true && \
-    #Grant nginx capability to bind privileged ports && \
-    setcap 'cap_net_bind_service=+ep' /usr/sbin/nginx && \
+    # client_max_body_size is owned by the vhost (http-level default + per-server runtime value) \
+    sed -i -e 's/^user nginx;/#user nginx;/' -e '/^[[:space:]]*client_max_body_size /d' /etc/nginx/nginx.conf && \
     echo 'alias ll="ls -hal"' >>  ${ETC_BASHRC} && \
     echo 'export PS1="\[\e[32m\]\u\[\e[m\]@\[\e[35m\]\h\[\e[m\]:\[\e[36m\]\w\[\e[m\]\\$ "' >> ${ETC_BASHRC} && \
-    echo 'umask 0000' >> ${ETC_BASHRC} && \
+    echo 'umask 0002' >> ${ETC_BASHRC} && \
     echo '. /etc/motd' >> ${ETC_BASHRC} && \
     rm -rf ${HOME_WWW}/.cache/* && \
     rm -rf ${HOME_WWW}/.composer/* && \
     rm -rf /var/cache/*
 
+## Runtime PHP / PHP-FPM settings used by conf/php.ini and conf/php-fpm.conf: override with `-e`
+ENV PHP_MEMORY_LIMIT='256M' \
+    PHP_MAX_EXECUTION_TIME='60' \
+    PHP_POST_MAX_SIZE='10M' \
+    PHP_UPLOAD_MAX_FILESIZE='10M' \
+    PHP_DATE_TIMEZONE='Europe/Paris' \
+    PHP_OPCACHE_VALIDATE_TIMESTAMPS='1' \
+    PHP_OPCACHE_PRELOAD='' \
+    PHP_PCOV_ENABLED='0' \
+    PHP_FPM_PM='dynamic' \
+    PHP_FPM_PM_MAX_CHILDREN='5' \
+    PHP_FPM_PM_START_SERVERS='2' \
+    PHP_FPM_PM_MIN_SPARE_SERVERS='1' \
+    PHP_FPM_PM_MAX_SPARE_SERVERS='3' \
+    PHP_FPM_PM_MAX_REQUESTS='500'
+
 EXPOSE 8080 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["docker-healthcheck"]
+
+## OCI metadata (declared last: VCS_REF changes on every commit and must not bust the layer cache)
+ARG VCS_REF=''
+LABEL org.opencontainers.image.title='nginx-php' \
+      org.opencontainers.image.description='PHP-FPM + Nginx base image for PHP web applications (Supervisor, Composer, Node.js, non-root)' \
+      org.opencontainers.image.source='https://github.com/infogene/docker-nginx-php' \
+      org.opencontainers.image.vendor='Infogene' \
+      org.opencontainers.image.authors='mZammouri <mohamed.zammouri@infogene.fr>' \
+      org.opencontainers.image.revision="${VCS_REF}"
 
 USER www-data
 

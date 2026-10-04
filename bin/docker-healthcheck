@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+#
+## Image HEALTHCHECK: when the default backend was started (the entrypoint renders
+## /tmp/nginx/runtime.conf for it), Nginx and PHP-FPM must answer /healthz
+## (PHP-FPM ping, the application is not involved). Other containers (cron,
+## workers, CLI, custom backend command) are reported healthy.
+if [ -f /tmp/nginx/runtime.conf ]; then
+    exec curl -fsS -o /dev/null --max-time 4 http://127.0.0.1:8080/healthz
+fi

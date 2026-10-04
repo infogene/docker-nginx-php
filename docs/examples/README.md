@@ -10,8 +10,9 @@ self-contained: `docker compose -f <file>.yml up`.
 | [`all-services.yml`](all-services.yml) | `--start-all`: backend + frontend under a single supervisord |
 | [`supervisor-multi-programs.yml`](supervisor-multi-programs.yml) | `--start-supervisor-cli`: multiple explicit Supervisor programs |
 | [`supervisor-worker.yml`](supervisor-worker.yml) | Background worker (Symfony Messenger), hardened |
-| [`production-hardened.yml`](production-hardened.yml) | Nginx + PHP-FPM with healthcheck, `cap_drop`/`cap_add`, read-only rootfs, resource limits |
-| [`hardened-php-builtin.yml`](hardened-php-builtin.yml) | Maximal lockdown (drop all caps, `no-new-privileges`) with PHP's built-in server |
+| [`production-hardened.yml`](production-hardened.yml) | Nginx + PHP-FPM with healthcheck, `cap_drop: ALL`, `no-new-privileges`, read-only rootfs, resource limits |
+| [`hardened-php-builtin.yml`](hardened-php-builtin.yml) | Same lockdown with PHP's built-in server: a single process, only `/tmp` writable |
+| [`backend-user-root.yml`](backend-user-root.yml) | Default backend with the container running as root (minimal capabilities) |
 
 Each example references the published image (`image:`). To test against the
 repository sources, uncomment the `build:` block present in each file.

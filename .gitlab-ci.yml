@@ -20,10 +20,10 @@ variables:
 # CUSTOM JOBS
 docker-build:
   # Use the official docker image.
-  image: docker:cli
+  image: docker:29-cli
   stage: build
   services:
-    - docker:dind
+    - docker:29-dind
   variables:
     DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     DOCKER_BUILDKIT: 0
@@ -41,7 +41,7 @@ docker-build:
   # Per-variant branch image, e.g. :<ref>-8.4-alpine. OS-less / floating tags
   # (:<php>, :latest, bare :<ref>) are owned by OS_LATEST / PHP_VERSION_LATEST.
   script:
-    - docker build --pull --build-arg "PHP_VERSION=$PHP_VERSION" -f "Dockerfile.$OS" -t "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" .
+    - docker build --pull --build-arg "PHP_VERSION=$PHP_VERSION" --build-arg "VCS_REF=$CI_COMMIT_SHA" -f "Dockerfile.$OS" -t "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" .
     - docker push "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS"
     # The default OS + default PHP version also publishes the bare :<ref> branch tag
     - |
@@ -87,10 +87,10 @@ docker-build:
 # Mirrors the versioned images built by `docker-build` from the GitLab registry
 # to ghcr.io. Runs on git tags (releases) and on the monthly scheduled rebuild.
 ghcr-push:
-  image: docker:cli
+  image: docker:29-cli
   stage: deploy
   services:
-    - docker:dind
+    - docker:29-dind
   needs:
     - docker-build
   variables:

@@ -2,5 +2,5 @@
 set -e
 
 #
-## Run CMD as www-data user
-exec sudo -E -H -u www-data bash
+## Open a bash shell as www-data user
+exec docker-exec-www-data bash

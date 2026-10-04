@@ -1,17 +1,18 @@
 #!make
 
 TARGET_ARGV = $(shell echo $(filter-out $@,$(MAKECMDGOALS)))
+VCS_REF = $(shell git rev-parse HEAD 2>/dev/null)
 
 default: help
 .PHONY: default
 
 ## Run docker build
 build-tag:
-	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
-	@test -z $(TARGET_ARGV) || docker build --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "VCS_REF=$(VCS_REF)" --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-debian .
+	@test -z $(TARGET_ARGV) || docker build --build-arg "VCS_REF=$(VCS_REF)" --build-arg "PHP_VERSION=$(TARGET_ARGV)" --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine .
 	@test -z $(TARGET_ARGV) || docker tag ghcr.io/infogene/nginx-php:$(TARGET_ARGV)-alpine ghcr.io/infogene/nginx-php:$(TARGET_ARGV)
-	@test ! -z $(TARGET_ARGV) || docker build --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:latest-debian .
-	@test ! -z $(TARGET_ARGV) || docker build --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:latest-alpine .
+	@test ! -z $(TARGET_ARGV) || docker build --build-arg "VCS_REF=$(VCS_REF)" --pull --no-cache -f Dockerfile.debian -t ghcr.io/infogene/nginx-php:latest-debian .
+	@test ! -z $(TARGET_ARGV) || docker build --build-arg "VCS_REF=$(VCS_REF)" --pull --no-cache -f Dockerfile.alpine -t ghcr.io/infogene/nginx-php:latest-alpine .
 	@test ! -z $(TARGET_ARGV) || docker tag ghcr.io/infogene/nginx-php:latest-alpine ghcr.io/infogene/nginx-php:latest
 .PHONY: build-tag
 

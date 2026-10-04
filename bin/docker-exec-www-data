@@ -2,9 +2,12 @@
 set -e
 
 #
-## Run CMD as www-data user
+## Run CMD as www-data user: when root, drop privileges with setpriv (no setuid
+## binary such as sudo in the image), keeping the environment; otherwise run as is.
 if [ "$(id -u)" = "0" ]; then
-    exec sudo -E -H -u www-data "$@"
+    HOME="$(getent passwd www-data | cut -d: -f6)"
+    export HOME USER=www-data LOGNAME=www-data
+    exec setpriv --reuid=www-data --regid=www-data --init-groups "$@"
 else
     exec "$@"
 fi

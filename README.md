@@ -94,7 +94,9 @@ docker run -d -p 8080:8080 -v "$PWD:/application" \
 ## Services: backend, frontend, cron
 
 The entrypoint starts the requested services under **Supervisor**. The image's
-default command is `--start-backend --mode-prod`.
+default command is `--start-backend --mode-prod`; when no service (nor `--cli`) is
+given, `--start-backend` is implied. `--cli`, `--start-cron` and the `--start-*`
+services are mutually exclusive, as are `--mode-dev` and `--mode-prod`.
 
 | Option | Starts | Default command |
 |---|---|---|
@@ -119,6 +121,17 @@ docker run -d -p 8080:8080 -v "$PWD:/application" \
 
 Backend and frontend are registered as **separate** Supervisor programs: each is
 restarted independently.
+
+- **Logs**: every service, Nginx access/error logs included, writes to the
+  container logs (`docker logs`).
+- **Graceful stop**: on `docker stop`, Nginx and PHP-FPM finish their in-flight
+  requests (up to 20 s) before exiting. Docker only waits 10 s by default: set
+  `stop_grace_period: 30s` (Compose) / `--stop-timeout 30` to give them the full
+  delay (Kubernetes already waits 30 s).
+- **Fail fast**: if a program cannot be (re)started (Supervisor `FATAL` state),
+  Supervisor stops and the container exits, so the orchestrator restarts it
+  instead of keeping a container without that service. Use a restart policy
+  (`restart: unless-stopped`), or set `SUPERVISOR_EXIT_ON_FATAL=false`.
 
 For a pnpm-based frontend, override the default Yarn command, e.g.
 `--start-frontend "pnpm --dir frontend run dev"`.
@@ -164,7 +177,7 @@ command:
 | `--supervisor-startretries N` | `startretries` | `3` |
 | `--supervisor-stopasgroup BOOL` | `stopasgroup` | `true` |
 | `--supervisor-killasgroup BOOL` | `killasgroup` | `true` |
-| `--supervisor-user USER` | `user` | `www-data` |
+| `--supervisor-user USER` | `user` | the container user (`www-data`) |
 | `--supervisor-stdout-logfile PATH` | `stdout_logfile` | `/dev/stdout` |
 | `--supervisor-stderr-logfile PATH` | `stderr_logfile` | `/dev/stderr` |
 
@@ -174,14 +187,19 @@ programs); after a `--supervisor-program` → overrides **that** program.
 **Extensible**: any `--supervisor-<a>-<b> VALUE` option becomes `a_b=VALUE`
 (e.g. `--supervisor-numprocs 4` → `numprocs=4`).
 
+Commands are taken **literally** (`%` is escaped for Supervisor), so they can
+contain `%` (e.g. `date +%F`); Supervisor's `%(...)s` expansions remain available
+in the other directives.
+
 > `user` must match the container's current user (`www-data` by default); to
 > supervise a different user, run the container as root (`--user 0`).
 
 ## Other executions
 
 ```shell
-# Single command then exit (no services)
-docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest --cli "php -v"
+# Single command then exit (no services), run through `bash -c` (quotes, pipes, && work)
+docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest \
+  --cli "php -r 'echo PHP_VERSION;' && composer --version"
 
 # Command at startup, before services
 docker run -d -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest \
@@ -196,11 +214,41 @@ docker run --rm -v "$PWD:/application" ghcr.io/infogene/nginx-php:latest bash
 | Variable | Effect |
 |---|---|
 | `APP_ENV` | `dev` / `prod` (determines the mode when no `--mode-*` option) |
-| `APP_BOOT_CMD` | Command run at startup (equivalent to `--boot-cmd`) |
-| `APP_BOOT_PERMS_FLUSH` | If `true`, adjusts `/application` permissions (775, group `www-data`) |
+| `APP_BOOT_CMD` | Command run at startup through `bash -c` (equivalent to `--boot-cmd`) |
+| `SUPERVISOR_EXIT_ON_FATAL` | `true` (default): stop the container when a supervised program enters `FATAL` |
+| `APP_BOOT_PERMS_FLUSH` | If `true`, makes `/application` group-owned and group-writable by `www-data`, not world-writable (`g+rwX,o-w`, setgid directories) |
 | `APP_BOOT_PHP_XDEBUG_ENABLED` | If `true`, enables xdebug (container must run as root) |
 | `APP_BOOT_PHP_EXT_ENABLED` | Space-separated list of PHP modules to enable (container must run as root) |
 | `USER_ID` / `GROUP_ID` | `www-data` uid/gid (remapped at build time, default 1000) |
+
+### PHP, PHP-FPM and Nginx settings
+
+Read at startup (`conf/php.ini`, `conf/php-fpm.conf`), override them with `-e`:
+
+| Variable | Setting | Default |
+|---|---|---|
+| `PHP_MEMORY_LIMIT` | `memory_limit` | `256M` |
+| `PHP_MAX_EXECUTION_TIME` | `max_execution_time` | `60` |
+| `PHP_POST_MAX_SIZE` | `post_max_size` | `10M` |
+| `PHP_UPLOAD_MAX_FILESIZE` | `upload_max_filesize` | `10M` |
+| `PHP_DATE_TIMEZONE` | `date.timezone` | `Europe/Paris` |
+| `PHP_OPCACHE_VALIDATE_TIMESTAMPS` | `opcache.validate_timestamps` (`0` when the code never changes at runtime) | `1` |
+| `PHP_OPCACHE_PRELOAD` | `opcache.preload` (e.g. `/application/config/preload.php`) | *(none)* |
+| `PHP_PCOV_ENABLED` | `pcov.enabled`: code coverage driver, loaded but inactive by default | `0` |
+| `PHP_FPM_PM` | `pm` | `dynamic` |
+| `PHP_FPM_PM_MAX_CHILDREN` | `pm.max_children`: size it as container memory / memory of one worker | `5` |
+| `PHP_FPM_PM_START_SERVERS` | `pm.start_servers` | `2` |
+| `PHP_FPM_PM_MIN_SPARE_SERVERS` | `pm.min_spare_servers` | `1` |
+| `PHP_FPM_PM_MAX_SPARE_SERVERS` | `pm.max_spare_servers` | `3` |
+| `PHP_FPM_PM_MAX_REQUESTS` | `pm.max_requests`: recycle workers (memory leaks) | `500` |
+| `NGINX_CLIENT_MAX_BODY_SIZE` | Nginx `client_max_body_size` | `PHP_POST_MAX_SIZE` |
+
+## Health check
+
+The image declares a `HEALTHCHECK` (`docker-healthcheck`): when the default backend
+(Nginx + PHP-FPM) was started, Nginx must answer `GET /healthz`, which PHP-FPM serves
+itself (`ping`) without running the application. Containers without Nginx (cron, workers, `--cli`, custom
+backend command) are reported healthy. `/healthz` is therefore reserved by the vhost.
 
 ## Ports
 
@@ -237,8 +285,14 @@ Ready-to-run Docker Compose files are provided in
 - **`docker-supervisor-cli`** generates `supervisord.conf` from the `--supervisor-*`
   options and execs `supervisord`. It is used internally by `--start-backend` /
   `--start-frontend`, and directly via `--start-supervisor-cli`.
-- **Non-root**: the image runs as `www-data`; Nginx is granted the
-  `cap_net_bind_service` capability but the vhost listens on `8080`.
+- **Non-root**: the image runs as `www-data` and Nginx listens on `8080`. No
+  binary carries file capabilities and the image ships no `sudo`, so containers
+  can drop **all** capabilities and use `no-new-privileges`. When started as root,
+  services and commands drop to `www-data` with `setpriv`. Ports below 1024 need
+  root (or `--sysctl net.ipv4.ip_unprivileged_port_start=0`).
+- **Pinned downloads**: Composer, Node.js, Yarn, pnpm, MJML, supercronic and the
+  PHP extension installer are pinned (`ARG`s) and checksum-verified where
+  applicable.
 - **Variants**: `Dockerfile.alpine` (default, `Dockerfile` is a symlink to it) and
   `Dockerfile.debian`.
 
