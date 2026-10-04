@@ -1,0 +1,86 @@
+#!/bin/sh
+set -eu
+
+#
+## Smoke test of a built image, run by CI before the image is pushed:
+## the bundled tools and helper scripts run, and the default backend (Nginx + PHP-FPM) starts and
+## serves the vhost as www-data, hardened (read-only root filesystem, no
+## capability) and as root in dev mode (xdebug enabled).
+## Usage: sh tests/smoke-test IMAGE (uses the local Docker daemon).
+IMAGE="${1:?usage: $0 IMAGE}"
+PREFIX="smoke-$$"
+STARTED=""
+
+cleanup() {
+    for name in $STARTED; do
+        docker rm -f "$name" >/dev/null 2>&1 || true
+    done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+## check_backend NAME DOCKER_RUN_ARGS...: start a container, wait for /healthz,
+## then check the image health check and that only the front controller runs PHP.
+check_backend() {
+    name="$PREFIX-$1"
+    shift
+    echo "==> backend: $name"
+    docker run -d --name "$name" "$@" >/dev/null
+    STARTED="$STARTED $name"
+
+    # Not docker-healthcheck: it reports healthy until the entrypoint has rendered the backend config
+    tries=0
+    until docker exec "$name" curl -fsS -o /dev/null http://127.0.0.1:8080/healthz >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 30 ] || [ "$(docker inspect -f '{{.State.Running}}' "$name")" != true ]; then
+            docker logs "$name" >&2 || true
+            fail "$name: /healthz did not answer"
+        fi
+        sleep 1
+    done
+
+    docker exec "$name" docker-healthcheck || fail "$name: the image health check failed"
+    docker exec "$name" curl -fsS http://127.0.0.1:8080/ | grep -q 'PHP Version' \
+        || fail "$name: / does not serve the front controller"
+    status="$(docker exec "$name" curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/info.php)"
+    [ "$status" = 404 ] || fail "$name: /info.php answered $status instead of 404"
+}
+
+echo "==> cli: bundled tools"
+out="$(docker run --rm "$IMAGE" --cli 'php -v && composer --version && node --version && yarn --version && pnpm --version && mjml --version && command -v supercronic' 2>&1)" \
+    || { echo "$out" >&2; fail "a bundled tool does not run"; }
+case "$out" in
+    *Warning*|*'Fatal error'*) echo "$out" >&2; fail "PHP reports a startup error" ;;
+esac
+
+echo "==> cli: exit code, passthrough and default user"
+status=0
+docker run --rm "$IMAGE" --cli 'exit 3' >/dev/null 2>&1 || status=$?
+[ "$status" = 3 ] || fail "--cli exited with $status instead of 3"
+docker run --rm "$IMAGE" ls -ld / >/dev/null || fail "passthrough of a command with options failed"
+user="$(docker run --rm "$IMAGE" whoami)"
+[ "$user" = www-data ] || fail "the image runs as $user instead of www-data"
+
+echo "==> cli: docker-phpmod-disable / docker-phpmod-enable (root)"
+docker run --rm --user 0 "$IMAGE" sh -c '
+    docker-phpmod-disable opcache && ! php -m | grep -qx "Zend OPcache" &&
+    docker-phpmod-enable opcache && php -m | grep -qx "Zend OPcache"' >/dev/null \
+    || fail "docker-phpmod-disable / docker-phpmod-enable did not toggle opcache"
+
+check_backend default "$IMAGE"
+
+check_backend hardened \
+    --read-only \
+    --tmpfs /tmp:mode=1777 --tmpfs /run/nginx:mode=1777 --tmpfs /var/lib/nginx/tmp:mode=1777 \
+    --cap-drop ALL --security-opt no-new-privileges \
+    "$IMAGE"
+
+check_backend root-dev --user 0 "$IMAGE" --mode-dev
+docker exec "$PREFIX-root-dev" php -m | grep -qi '^xdebug$' || fail "--mode-dev as root did not enable xdebug"
+
+echo "==> OK: $IMAGE"

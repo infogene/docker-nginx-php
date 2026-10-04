@@ -24,7 +24,8 @@
 
 set -Eeuo pipefail
 
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 # Default path deliberately writable by both www-data and root.
 readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
 
@@ -36,7 +37,8 @@ readonly SUPERVISORD_CONF="${SUPERVISORD_CONF:-/tmp/supervisord.conf}"
 # died with "failed to open error_log (/proc/self/fd/2): Permission denied".
 # Matching the program user to the launch user keeps the fd owner consistent
 # (and respects an explicit `--user root`).
-readonly RUN_USER="$(id -un)"
+RUN_USER="$(id -un)"
+readonly RUN_USER
 
 readonly EXIT_ON_FATAL="${SUPERVISOR_EXIT_ON_FATAL:-true}"
 
@@ -117,8 +119,8 @@ EOF
 # Opens a new program initialized with the current global defaults.
 new_program() {
   CUR=$((CUR + 1))
-  PROG_CMD[$CUR]="$1"
-  PROG_NAME[$CUR]=""
+  PROG_CMD[CUR]="$1"
+  PROG_NAME[CUR]=""
   declare -gA "PROGDIR_${CUR}"
   local -n _dir="PROGDIR_${CUR}"
   local k
@@ -134,8 +136,8 @@ set_directive() {
   if [[ $CUR -lt 0 ]]; then
     GLOBAL["$key"]="$val"
   else
-    local -n _dir="PROGDIR_${CUR}"
-    _dir["$key"]="$val"
+    local -n _target="PROGDIR_${CUR}"
+    _target["$key"]="$val"
   fi
 }
 
@@ -154,7 +156,7 @@ parse_args() {
         [[ $# -ge 2 ]] || die "Option $1 requires a value"
         [[ $CUR -ge 0 ]] || die "$1 must follow a --supervisor-program"
         [[ "$2" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Invalid program name: $2"
-        PROG_NAME[$CUR]="$2"
+        PROG_NAME[CUR]="$2"
         shift 2
         ;;
       --supervisor-*)
@@ -181,7 +183,7 @@ emit_program() {
     [[ $idx -eq 0 ]] && name="app" || name="app$((idx + 1))"
   fi
 
-  local -n _dir="PROGDIR_${idx}"
+  local -n _directives="PROGDIR_${idx}"
   echo ""
   echo "[program:${name}]"
   # Literal command: supervisord would otherwise parse '%' as a format string
@@ -192,16 +194,16 @@ emit_program() {
   local key
   for key in "${KEY_ORDER[@]}"; do
     [[ "$key" == "command" ]] && continue
-    if [[ -n "${_dir[$key]+set}" ]]; then
-      echo "${key}=${_dir[$key]}"
+    if [[ -n "${_directives[$key]+set}" ]]; then
+      echo "${key}=${_directives[$key]}"
       emitted+="$key "
     fi
   done
 
   # Extra directives not listed in KEY_ORDER (extensibility)
-  for key in "${!_dir[@]}"; do
+  for key in "${!_directives[@]}"; do
     [[ "$emitted" == *" $key "* ]] && continue
-    echo "${key}=${_dir[$key]}"
+    echo "${key}=${_directives[$key]}"
   done
 }
 

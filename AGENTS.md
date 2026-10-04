@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, …) when w
 
 ## What this is
 
-This repo builds a reusable **base Docker image** (`ghcr.io/infogene/nginx-php`) for running PHP web apps behind nginx + PHP-FPM. It is *not* an application — `src/public/index.php` is just a `phpinfo()` placeholder that users replace by mounting/copying their own app into `/application`. There is no test suite; "running" the project means building an image and starting a container.
+This repo builds a reusable **base Docker image** (`ghcr.io/infogene/nginx-php`) for running PHP web apps behind nginx + PHP-FPM. It is *not* an application — `src/public/index.php` is just a `phpinfo()` placeholder that users replace by mounting/copying their own app into `/application`. The only test is `tests/smoke-test IMAGE` (run by CI on every build, `make smoke-test [version]` locally): it starts the image's run modes (CLI, passthrough, helper scripts, backend as www-data, hardened, root + dev) and checks they serve. Every script in `bin/` and the smoke test must pass `shellcheck` (CI job, all severities).
 
 ## Conventions
 
@@ -17,6 +17,8 @@ This repo builds a reusable **base Docker image** (`ghcr.io/infogene/nginx-php`)
 make build-tag            # builds latest-debian, latest-alpine, tags latest -> alpine
 make build-tag 8.4        # builds 8.4-debian, 8.4-alpine, tags 8.4 -> alpine
 make push-tag [version]   # push to ghcr.io/infogene/nginx-php
+make smoke-test [version] # tests/smoke-test on the <version|latest>-debian / -alpine images built above
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 bin/* tests/smoke-test   # CI lint, must stay clean
 
 # Build a single variant directly
 docker build --build-arg PHP_VERSION=8.4 -f Dockerfile.alpine -t nginx-php:test .
@@ -58,7 +60,7 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 - `--start-supervisor-cli` + `--supervisor-*` args: generic path forwarding everything verbatim to `docker-supervisor-cli`. `--supervisor-program` is repeatable (one `[program]` each); options before the 1st program are global defaults, options after override the current program; `--supervisor-<a>-<b> VALUE` → `a_b=VALUE`.
 - `--start-cron` execs `supercronic /var/spool/cron/crontabs/www-data` (as www-data via `docker-exec-www-data`, not under supervisor) and is checked before the service-registration block. supercronic replaced crond/cron because those daemons need root to switch user per job (silently running nothing under the non-root image), and Debian's cron also rejects non-0600 crontabs and logs to a non-existent syslog. Its version + sha256 are `ARG`s in both Dockerfiles.
 - When the container runs as root, the backend's nginx gets `-g "user www-data; daemon off;"` so workers can write the www-data-owned `/var/lib/nginx/tmp` (upload buffering).
-- **Any positional argument triggers passthrough** (`exec "$@"`) — all flags are ignored. This is why `docker run ... bash` and `... ls -l` work.
+- **The first positional argument triggers passthrough**: it is `exec`'d with every remaining argument verbatim, and the flags before it are ignored. This is why `docker run ... bash` and `... ls -l` work (`-l` is not parsed as an entrypoint option).
 - `validate_params` rejects contradictory flags (`--mode-dev` + `--mode-prod`; more than one of `--cli` / `--start-cron` / `--start-*` services) and implies `--start-backend` when no run mode is given. `--cli` and `--boot-cmd` run through `bash -c`.
 - **Graceful stop**: the image's `STOPSIGNAL` is `SIGQUIT` (inherited from `php:*-fpm`); supervisord forwards each program's `stopsignal`. The backend registers php-fpm and nginx with `stopsignal=QUIT` + `stopwaitsecs=25`, and `conf/php-fpm.conf` (→ `php-fpm.d/zz-nginx-php.conf`) sets `process_control_timeout = 20s` — both are needed, otherwise in-flight requests get a 502.
 - nginx `access.log`/`error.log` are symlinks to `/dev/stdout`/`/dev/stderr` (set in the Dockerfiles).
@@ -73,7 +75,7 @@ Ready-to-run Docker Compose examples live in `docs/examples/` (indexed in `docs/
 **`bin/` helper scripts** are all copied to `/usr/local/bin/` and on PATH inside the image:
 - `docker-supervisor-cli` — generates `supervisord.conf` from `--supervisor-*` args and execs supervisord (see entrypoint section above).
 - `docker-exec-www-data <cmd>` / `su-www-data` — drop to www-data via `setpriv` when root (keeping the environment, `HOME` set), else run directly. Used throughout the entrypoint to run app/yarn/git commands.
-- `docker-phpmod-enable` / `docker-phpmod-disable` — wrap `docker-php-ext-enable` and comment out extension ini lines.
+- `docker-phpmod-enable` / `docker-phpmod-disable` — wrap `docker-php-ext-enable`, and comment out the `extension=` / `zend_extension=` lines of the ini files matching the module name.
 - `docker-permissions-flush` — `chown -R :www-data` + `chmod -R g+rwX,o-w` on `/application`, setgid on directories (no blanket 775: files keep their own execute bit).
 - `docker-exec-cmd` — bare `exec "$@"` wrapper.
 - `docker-motd-sysinfo` / `docker-setup-motd` — shell login banner.
@@ -102,9 +104,12 @@ Every download is pinned through `ARG`s at the top of its `RUN`, and verified wi
 
 ## CI/CD
 
-`.gitlab-ci.yml` is the source of truth for published images (GitLab is primary; the repo mirrors to GitHub). It includes Infogene's standard code-scan template plus:
-- `docker-build` — matrix `PHP_VERSION` [8.4, 8.5] × `OS` [alpine, debian], serialized via `resource_group`, `DOCKER_BUILDKIT: 0`. Pushes `:<ref>-<php>-<os>` to the GitLab registry on every MR / default-branch commit; the `OS_LATEST` + `PHP_VERSION_LATEST` combination (alpine, 8.4) also owns bare `:<ref>`, `:<php>` and `:latest`.
-- Releases happen on a **git tag** *and* on a **monthly scheduled pipeline** (version derived from the date, `vYY-MM-DD`, rebuilding with `--pull` for base-image security fixes): versioned + floating tags go to the GitLab registry, and `ghcr-push` mirrors them to `ghcr.io/infogene/nginx-php`.
-- Adding a PHP version or OS means updating both matrices (`docker-build` and `ghcr-push`).
+`.gitlab-ci.yml` is the source of truth for published images (GitLab is primary; the repo mirrors to GitHub). It includes Infogene's standard code-scan template **pinned to a tag** (`ref: 1.1.2`: bump it deliberately after reading the template's CHANGELOG) and reuses its hidden jobs (`.docker-build` for the dind image/service/login, `.docker-promote` for crane), replacing their scripts. Pipelines run only for merge requests, the default branch (including the schedule) and tags (`workflow:rules`); a new push cancels the previous pipeline's `interruptible` jobs (all but `release-image`).
+- `shellcheck` (`lint` stage) gates `docker-build`: `bin/*` and `tests/smoke-test` must stay clean at every severity. Fix the code rather than adding `disable` directives.
+- `.variants` holds the single `PHP_VERSION` [8.4, 8.5] × `OS` [alpine, debian] matrix, extended by `docker-build`, `container-scanning-job` and `release-image`: adding a PHP version or OS is a change there only.
+- `docker-build` (MR + default branch + schedule, serialized via `resource_group`) builds with buildx (`--provenance=false --sbom=false`, per-variant registry cache `$CI_REGISTRY_IMAGE/cache:<php>-<os>`), `--load`s the image into dind, runs `tests/smoke-test`, and only then pushes `:<sha>-<php>-<os>` (the verified commit image), `:<ref>-<php>-<os>` and, for `OS_LATEST` + `PHP_VERSION_LATEST` (alpine, 8.4), the bare `:<ref>`. Only MR builds read the cache; the default branch and the schedule build with `--no-cache` so released images carry fresh OS packages.
+- `container-scanning-job` (template) scans each variant's `:<sha>-<php>-<os>`; the source scans start with the pipeline (`needs: []`).
+- SonarQube and DefectDojo are wired but off (`JOB_SONR_ENABLED` / `JOB_DOJO_ENABLED: 0`) until the project defines `CI_SONAR_HOST_URL`, `CI_SONAR_PROJECT_KEY`, `CI_SONAR_TOKEN` and `CI_JOB_DOJO_URL`, `CI_JOB_DOJO_TOKEN`, `CI_JOB_DOJO_PRODUCT_ID`. Sonar settings live in `sonar-project.properties`. DefectDojo imports one container scanning report (a second import would close the first one's findings), so `container-scanning-report` merges the per-variant reports and replaces `container-scanning-job` in `defectdojo-report-job`'s `needs`.
+- Releases happen on a **git tag** *and* on a **monthly scheduled pipeline** on the default branch (version derived from the date, `vYY-MM-DD`; its `docker-build` runs `--pull --no-cache` for base-image and package security fixes). `release-image` does not rebuild: it `crane tag`s the commit image to `:<php>-<os>-<release>` and `:<php>-<os>` (+ `:<php>` for `OS_LATEST`, `:latest` for `OS_LATEST` + `PHP_VERSION_LATEST`) in the GitLab registry, and `crane copy`s it to `ghcr.io/infogene/nginx-php` (`CI_GHCR_USER` / `CI_GHCR_TOKEN`). A tag on a commit whose default-branch pipeline has not pushed its images yet fails with an explicit message: retry once it has.
 
 The `Makefile` is for local/manual builds and pushes the same image coordinates.
