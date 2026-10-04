@@ -26,6 +26,12 @@ push-tag:
 	@test ! -z $(TARGET_ARGV) || docker push ghcr.io/infogene/nginx-php:latest
 .PHONY: push-tag
 
+## Smoke-test the images built by build-tag (tests/smoke-test, also run by CI)
+smoke-test:
+	@sh tests/smoke-test ghcr.io/infogene/nginx-php:$(or $(TARGET_ARGV),latest)-debian
+	@sh tests/smoke-test ghcr.io/infogene/nginx-php:$(or $(TARGET_ARGV),latest)-alpine
+.PHONY: smoke-test
+
 %:
 	@:
 

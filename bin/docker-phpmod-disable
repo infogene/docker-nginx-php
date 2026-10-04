@@ -1,14 +1,14 @@
 #!/bin/sh
 set -e
 
+#
+## Disable PHP extension MOD: comment out the extension= / zend_extension= lines
+## of the additional ini files whose path matches MOD (e.g. xdebug, apcu; not
+## opcache on PHP >= 8.5, which compiles it in).
 PHP_MOD=$1
-PHP_MOD_INIFILE=''
 
-if [ ! -z "${PHP_MOD}" ]; then
-  PHP_MOD_INIFILE=$(php --ini | grep -E "${PHP_MOD}" | sed -e s/\.ini\,/\.ini/)
-
-  if [ ! -z "${PHP_MOD_INIFILE}" ]; then
-     sed -i -e s/^[[:space:]]*extension[[:space:]]*=/\;extension=/ ${PHP_MOD_INIFILE}
-  fi
-
+if [ -n "${PHP_MOD}" ]; then
+  php --ini | grep -oE '/[^,[:space:]]+\.ini' | grep -E "${PHP_MOD}" | while IFS= read -r PHP_MOD_INIFILE; do
+    sed -i -e 's/^[[:space:]]*\(\(zend_\)\{0,1\}extension\)[[:space:]]*=/;\1=/' "${PHP_MOD_INIFILE}"
+  done
 fi

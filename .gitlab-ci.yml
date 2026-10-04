@@ -1,134 +1,99 @@
 include:
   - project: 'templates/ci/infogene-standard-code-scans'
-    ref: main
-    file: 'standard-scans.gitlab-ci.yml'
+    # Pinned: a template change reaches this pipeline only through a deliberate bump.
+    ref: 2.0.0
+    file:
+      - 'standard-scans.gitlab-ci.yml'
+      # workflow: merge requests, default branch and tags, auto-cancel; default: interruptible, retry
+      - 'pipeline-defaults.gitlab-ci.yml'
 
 variables:
   JOB_DAST_ENABLED: 0
+  # SonarQube (sonar-project.properties) and DefectDojo are set up but stay off until the project defines
+  # CI_SONAR_HOST_URL, CI_SONAR_PROJECT_KEY, CI_SONAR_TOKEN and CI_JOB_DOJO_URL, CI_JOB_DOJO_TOKEN,
+  # CI_JOB_DOJO_PRODUCT_ID (Settings > CI/CD > Variables): then set them to 1.
   JOB_SONR_ENABLED: 0
   JOB_DOJO_ENABLED: 0
-  JOB_CTSN_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-  # The matrix builds one image per (PHP_VERSION × OS) combination. These two
-  # pick which combination owns the OS-less / floating tags:
-  #   - OS_LATEST          -> the `:<php>` (no OS suffix) tags point to this OS
-  #   - PHP_VERSION_LATEST -> with OS_LATEST, also owns `:latest` and the bare
-  #                           `:<ref>` branch tag (the one the code-scan job pulls)
-  # Both must be present in the matrix below.
+  # The variants owning the floating release tags (release-image): `:<php>` points to OS_LATEST,
+  # `:latest` to OS_LATEST + PHP_VERSION_LATEST. Both must be in the `.variants` matrix.
   PHP_VERSION_LATEST: "8.4"
   OS_LATEST: "alpine"
+  # Monthly rebuild: a pipeline schedule on the default branch (Build > Pipeline schedules, cron `0 0 1 * *`)
+  # rebuilds the images from scratch (base images and OS packages security fixes) and releases them with a
+  # date-based version (e.g. v26-06-01).
+  DOCKER_PROMOTE_ON_SCHEDULE: 1
 
-# CUSTOM JOBS
+# Stages only group the jobs for display: `needs` drive the execution order.
+# `test` and `dast` also host the template's disabled jobs, whose stage GitLab validates anyway.
+stages:
+  - lint
+  - build
+  - test
+  - release
+  - dast
+  - report
+
+# One job per (PHP version × OS) for every job handling the images
+# (e.g. docker-build: [8.4, alpine], [8.4, debian], [8.5, alpine], [8.5, debian]).
+# Adding a PHP version or an OS (with its Dockerfile.<os>) only takes a change here.
+.variants:
+  parallel:
+    matrix:
+      - PHP_VERSION: [ "8.4", "8.5" ]
+        OS: [ "alpine", "debian" ]
+  variables:
+    # The template derives each variant's images from it: `:<sha>-<php>-<os>` (the commit image, scanned and
+    # promoted) and `:<ref>-<php>-<os>`
+    DOCKER_TAG_SUFFIX: -$PHP_VERSION-$OS
+
+# The scripts copied into the image, and the smoke test.
+shellcheck:
+  stage: lint
+  extends: [ .job-rules-mr-main ]
+  image: koalaman/shellcheck-alpine:v0.11.0
+  needs: [ ]
+  script:
+    - shellcheck bin/* tests/smoke-test
+
 docker-build:
-  # Use the official docker image.
-  image: docker:29-cli
-  stage: build
-  services:
-    - docker:29-dind
-  variables:
-    DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-    DOCKER_BUILDKIT: 0
-  # Serialize the matrix: only one instance of this group runs at a time, so the
-  # (PHP version × OS) combinations build one after another instead of all at once.
-  resource_group: docker-build
-  # One job per (PHP version × OS)
-  # (e.g. docker-build: [8.4, alpine], [8.4, debian], [8.5, alpine], [8.5, debian])
-  parallel:
-    matrix:
-      - PHP_VERSION: ["8.4", "8.5"]
-        OS: ["alpine", "debian"]
-  before_script:
-    - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
-  # Per-variant branch image, e.g. :<ref>-8.4-alpine. OS-less / floating tags
-  # (:<php>, :latest, bare :<ref>) are owned by OS_LATEST / PHP_VERSION_LATEST.
-  script:
-    - docker build --pull --build-arg "PHP_VERSION=$PHP_VERSION" --build-arg "VCS_REF=$CI_COMMIT_SHA" -f "Dockerfile.$OS" -t "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" .
-    - docker push "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS"
-    # The default OS + default PHP version also publishes the bare :<ref> branch tag
-    - |
-      if [ "$OS" = "$OS_LATEST" ] && [ "$PHP_VERSION" = "$PHP_VERSION_LATEST" ]; then
-        docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$DOCKER_IMAGE_NAME"
-        docker push "$DOCKER_IMAGE_NAME"
-      fi
-    # Versioned + floating tags are published on a git tag, and on the monthly
-    # scheduled rebuild (no git tag — the version is derived from the date, e.g.
-    # v26-06-01). The scheduled rebuild uses `docker build --pull`, so it picks up
-    # the latest up-to-date PHP alpine/debian base images and the security fixes
-    # they ship. RELEASE is the version suffix in either case.
-    - |
-      RELEASE=""
-      [ -n "$CI_COMMIT_TAG" ] && RELEASE="$CI_COMMIT_TAG"
-      [ "$CI_PIPELINE_SOURCE" = "schedule" ] && RELEASE="v$(date -u +%y-%m-%d)"
-      if [ -n "$RELEASE" ]; then
-        docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$CI_REGISTRY_IMAGE:$PHP_VERSION-$OS-$RELEASE"
-        docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$CI_REGISTRY_IMAGE:$PHP_VERSION-$OS"
-        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-$OS-$RELEASE"
-        docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION-$OS"
-        # The default OS owns the OS-less :<php> tag, and (with the default PHP) `latest`
-        if [ "$OS" = "$OS_LATEST" ]; then
-          docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$CI_REGISTRY_IMAGE:$PHP_VERSION"
-          docker push "$CI_REGISTRY_IMAGE:$PHP_VERSION"
-          if [ "$PHP_VERSION" = "$PHP_VERSION_LATEST" ]; then
-            docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$CI_REGISTRY_IMAGE:latest"
-            docker push "$CI_REGISTRY_IMAGE:latest"
-          fi
-        fi
-      fi
-  # Run this job in a branch where a Dockerfile exists
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_TAG
-    # Monthly rebuild from up-to-date base images (set up via Build >
-    # Pipeline schedules, cron `0 0 1 * *` on the default branch). No extra
-    # CI/CD variable needed — only the default $CI_REGISTRY_* credentials.
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-
-# PUSH TO GitHub Container Registry
-# Mirrors the versioned images built by `docker-build` from the GitLab registry
-# to ghcr.io. Runs on git tags (releases) and on the monthly scheduled rebuild.
-ghcr-push:
-  image: docker:29-cli
-  stage: deploy
-  services:
-    - docker:29-dind
+  extends: [ .docker-build, .variants ]
   needs:
-    - docker-build
+    - job: shellcheck
+      artifacts: false
   variables:
-    DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-    GHCR_IMAGE: ghcr.io/infogene/nginx-php
-  # Serialize the matrix: only one instance of this group runs at a time
-  resource_group: ghcr-push
-  # One job per (PHP version × OS), mirroring each variant built by docker-build
-  parallel:
-    matrix:
-      - PHP_VERSION: ["8.4", "8.5"]
-        OS: ["alpine", "debian"]
+    DOCKER_BUILD_FILE: Dockerfile.$OS
+    DOCKER_BUILD_ARGS: --build-arg PHP_VERSION=$PHP_VERSION
+    # Nothing is pushed unless the image runs and serves in its documented modes
+    DOCKER_BUILD_TEST_SCRIPT: sh tests/smoke-test
+    # `latest` is a release tag here (release-image), not the last default branch build
+    DOCKER_BUILD_TAG_LATEST: 0
+    # Keep the Dockerfile's GitHub source label: it links the ghcr.io package to its repository
+    DOCKER_LABEL_SOURCE: ''
+
+# Analysis settings live in sonar-project.properties.
+sonar-qube-job:
+  needs: [ ]
+
+# One scan per variant: Alpine and Debian ship different OS packages.
+container-scanning-job:
+  extends: [ .container-scanning, .variants ]
+
+# Releases each variant's verified commit image, without a rebuild, on a git tag and on the monthly rebuild:
+# `:<php>-<os>-<version>` and `:<php>-<os>`, plus the floating `:<php>` and `:latest`, in the GitLab registry
+# and on ghcr.io.
+release-image:
+  stage: release
+  extends: [ .docker-promote, .variants ]
+  variables:
+    DOCKER_PROMOTE_MIRROR_IMAGE: ghcr.io/infogene/nginx-php
+    DOCKER_PROMOTE_MIRROR_USER: $CI_GHCR_USER
+    DOCKER_PROMOTE_MIRROR_PASSWORD: $CI_GHCR_TOKEN
   before_script:
-    - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
-    - echo -n $CI_GHCR_TOKEN | docker login -u $CI_GHCR_USER --password-stdin ghcr.io
-  script:
-    # Pull the variant that `docker-build` pushed to the GitLab registry
-    - docker pull "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS"
-    # RELEASE = the git tag, or a date-based version on the monthly rebuild
-    # (kept in sync with docker-build).
     - |
-      RELEASE=""
-      [ -n "$CI_COMMIT_TAG" ] && RELEASE="$CI_COMMIT_TAG"
-      [ "$CI_PIPELINE_SOURCE" = "schedule" ] && RELEASE="v$(date -u +%y-%m-%d)"
-      docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$GHCR_IMAGE:$PHP_VERSION-$OS-$RELEASE"
-      docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$GHCR_IMAGE:$PHP_VERSION-$OS"
-      docker push "$GHCR_IMAGE:$PHP_VERSION-$OS-$RELEASE"
-      docker push "$GHCR_IMAGE:$PHP_VERSION-$OS"
-      # The default OS owns the OS-less :<php> tag, and (with the default PHP) `latest`
+      DOCKER_PROMOTE_TAGS="$PHP_VERSION-$OS-{version} $PHP_VERSION-$OS"
       if [ "$OS" = "$OS_LATEST" ]; then
-        docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$GHCR_IMAGE:$PHP_VERSION"
-        docker push "$GHCR_IMAGE:$PHP_VERSION"
+        DOCKER_PROMOTE_TAGS="$DOCKER_PROMOTE_TAGS $PHP_VERSION"
         if [ "$PHP_VERSION" = "$PHP_VERSION_LATEST" ]; then
-          docker tag "$DOCKER_IMAGE_NAME-$PHP_VERSION-$OS" "$GHCR_IMAGE:latest"
-          docker push "$GHCR_IMAGE:latest"
+          DOCKER_PROMOTE_TAGS="$DOCKER_PROMOTE_TAGS latest"
         fi
       fi
-  # Mirror to GHCR on git tags (releases) and on the monthly scheduled rebuild
-  rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_PIPELINE_SOURCE == "schedule"

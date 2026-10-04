@@ -263,6 +263,7 @@ backend command) are reported healthy. `/healthz` is therefore reserved by the v
 ```shell
 make build-tag 8.4   # local build of the 8.4-alpine / 8.4-debian variants
 make build-tag       # `latest` variants
+make smoke-test 8.4  # check that the built 8.4 variants start and serve (tests/smoke-test)
 make push-tag 8.4    # push to ghcr.io/infogene/nginx-php
 ```
 
