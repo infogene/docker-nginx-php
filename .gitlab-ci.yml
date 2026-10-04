@@ -1,7 +1,7 @@
 include:
   - project: 'templates/ci/infogene-standard-code-scans'
     # Pinned: a template change reaches this pipeline only through a deliberate bump.
-    ref: feature/v2-image-pipeline
+    ref: 2.0.0
     file:
       - 'standard-scans.gitlab-ci.yml'
       # workflow: merge requests, default branch and tags, auto-cancel; default: interruptible, retry
