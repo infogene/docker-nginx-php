@@ -82,9 +82,6 @@ docker-build:
   needs:
     - job: shellcheck
       artifacts: false
-  # Serialize the matrix: only one instance of this group runs at a time, so the
-  # (PHP version × OS) combinations build one after another instead of all at once.
-  resource_group: docker-build
   script:
     - |
       set -euf
