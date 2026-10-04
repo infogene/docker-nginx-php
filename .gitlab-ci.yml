@@ -1,35 +1,27 @@
 include:
   - project: 'templates/ci/infogene-standard-code-scans'
     # Pinned: a template change reaches this pipeline only through a deliberate bump.
-    ref: 1.1.2
-    file: 'standard-scans.gitlab-ci.yml'
-
-# Merge requests and the default branch build and smoke-test the images. A git tag and the monthly
-# scheduled rebuild publish them. One pipeline per push, and a new push cancels the previous one.
-workflow:
-  auto_cancel:
-    on_new_commit: interruptible
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    # Also the monthly rebuild: a pipeline schedule on the default branch
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_TAG
+    ref: feature/v2-image-pipeline
+    file:
+      - 'standard-scans.gitlab-ci.yml'
+      # workflow: merge requests, default branch and tags, auto-cancel; default: interruptible, retry
+      - 'pipeline-defaults.gitlab-ci.yml'
 
 variables:
   JOB_DAST_ENABLED: 0
-  # SonarQube (sonar-project.properties) and DefectDojo (container-scanning-report) are set up but stay off
-  # until the project defines CI_SONAR_HOST_URL, CI_SONAR_PROJECT_KEY, CI_SONAR_TOKEN and CI_JOB_DOJO_URL,
-  # CI_JOB_DOJO_TOKEN, CI_JOB_DOJO_PRODUCT_ID (Settings > CI/CD > Variables): then set them to 1.
+  # SonarQube (sonar-project.properties) and DefectDojo are set up but stay off until the project defines
+  # CI_SONAR_HOST_URL, CI_SONAR_PROJECT_KEY, CI_SONAR_TOKEN and CI_JOB_DOJO_URL, CI_JOB_DOJO_TOKEN,
+  # CI_JOB_DOJO_PRODUCT_ID (Settings > CI/CD > Variables): then set them to 1.
   JOB_SONR_ENABLED: 0
   JOB_DOJO_ENABLED: 0
-  # The matrix builds one image per (PHP_VERSION × OS) combination. These two
-  # pick which combination owns the OS-less / floating tags:
-  #   - OS_LATEST          -> the `:<php>` (no OS suffix) tags point to this OS
-  #   - PHP_VERSION_LATEST -> with OS_LATEST, also owns `:latest` and the bare
-  #                           `:<ref>` branch tag
-  # Both must be present in the `.variants` matrix below.
+  # The variants owning the floating release tags (release-image): `:<php>` points to OS_LATEST,
+  # `:latest` to OS_LATEST + PHP_VERSION_LATEST. Both must be in the `.variants` matrix.
   PHP_VERSION_LATEST: "8.4"
   OS_LATEST: "alpine"
+  # Monthly rebuild: a pipeline schedule on the default branch (Build > Pipeline schedules, cron `0 0 1 * *`)
+  # rebuilds the images from scratch (base images and OS packages security fixes) and releases them with a
+  # date-based version (e.g. v26-06-01).
+  DOCKER_PROMOTE_ON_SCHEDULE: 1
 
 # Stages only group the jobs for display: `needs` drive the execution order.
 # `test` and `dast` also host the template's disabled jobs, whose stage GitLab validates anyway.
@@ -41,12 +33,6 @@ stages:
   - dast
   - report
 
-default:
-  interruptible: true
-  retry:
-    max: 2
-    when: [ runner_system_failure, stuck_or_timeout_failure, api_failure, scheduler_failure ]
-
 # One job per (PHP version × OS) for every job handling the images
 # (e.g. docker-build: [8.4, alpine], [8.4, debian], [8.5, alpine], [8.5, debian]).
 # Adding a PHP version or an OS (with its Dockerfile.<os>) only takes a change here.
@@ -55,213 +41,59 @@ default:
     matrix:
       - PHP_VERSION: [ "8.4", "8.5" ]
         OS: [ "alpine", "debian" ]
-
-# A tag pipeline only promotes the commit image (release-image), which exists only if that commit passed
-# the blocking jobs: running them again on the tag would prove nothing.
-.verify-rules:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  variables:
+    # The template derives each variant's images from it: `:<sha>-<php>-<os>` (the commit image, scanned and
+    # promoted) and `:<ref>-<php>-<os>`
+    DOCKER_TAG_SUFFIX: -$PHP_VERSION-$OS
 
 # The scripts copied into the image, and the smoke test.
 shellcheck:
   stage: lint
-  extends: [ .verify-rules ]
+  extends: [ .job-rules-mr-main ]
   image: koalaman/shellcheck-alpine:v0.11.0
   needs: [ ]
   script:
     - shellcheck bin/* tests/smoke-test
 
-# Builds each variant, smoke-tests it (tests/smoke-test), then pushes it. Pushed only once the smoke test
-# passes, so the commit image `:<sha>-<php>-<os>` is a verified one: the image a release promotes.
-# Also pushes `:<ref>-<php>-<os>`, and the bare `:<ref>` for OS_LATEST + PHP_VERSION_LATEST.
 docker-build:
-  stage: build
-  # Template job: docker:${DOCKER_VERSION}-cli image, dind service and registry login (its script is replaced:
-  # it would push the same `:<sha>` and `:latest` from every variant).
-  extends: [ .docker-build, .variants, .verify-rules ]
+  extends: [ .docker-build, .variants ]
   needs:
     - job: shellcheck
       artifacts: false
-  script:
-    - |
-      set -euf
-
-      variant="$PHP_VERSION-$OS"
-      commit_image="$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA-$variant"
-      image_tags="$commit_image $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$variant"
-      if [ "$OS" = "$OS_LATEST" ] && [ "$PHP_VERSION" = "$PHP_VERSION_LATEST" ]; then
-        image_tags="$image_tags $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
-      fi
-      # BuildKit registry cache, one per variant: unchanged layers are reused across pipelines
-      cache_ref="$CI_REGISTRY_IMAGE/cache:$variant"
-
-      set -- --pull -f "Dockerfile.$OS" \
-        --build-arg "PHP_VERSION=$PHP_VERSION" \
-        --build-arg "VCS_REF=$CI_COMMIT_SHA" \
-        --provenance=false --sbom=false \
-        --cache-from "type=registry,ref=$cache_ref" \
-        --cache-to "type=registry,ref=$cache_ref,mode=max,image-manifest=true,oci-mediatypes=true"
-      # Merge requests reuse the cache. The default branch (whose images releases promote) and the monthly
-      # rebuild start from scratch, so a release never ships OS packages frozen in an old cached layer.
-      if [ "$CI_PIPELINE_SOURCE" != "merge_request_event" ]; then
-        set -- "$@" --no-cache
-      fi
-      for tag in $image_tags; do
-        set -- "$@" -t "$tag"
-      done
-
-      # Builder set up like the template's buildx engine: on a context (buildx refuses the TLS environment
-      # of the dind service) and on the dind network (registries behind an internal DNS name resolve).
-      docker context create ci-buildx-context >/dev/null
-      docker buildx create --use --name ci-buildx --driver docker-container --driver-opt network=host ci-buildx-context
-      # Loaded into the dind daemon to be tested, then pushed as is: a single-platform OCI manifest without
-      # attestation, the same manifest type as the images published by the classic builder
-      docker buildx build "$@" --load .
-
-      sh tests/smoke-test "$commit_image"
-
-      for tag in $image_tags; do
-        docker push "$tag"
-      done
-
-# Template scans: they read the sources only, so they start with the pipeline.
-semgrep-sast-job:
-  needs: [ ]
-
-kics-iac-sast-job:
-  needs: [ ]
-
-secret-detection-job:
-  needs: [ ]
-
-dependency-scanning-job:
-  needs: [ ]
+  variables:
+    DOCKER_BUILD_FILE: Dockerfile.$OS
+    DOCKER_BUILD_ARGS: --build-arg PHP_VERSION=$PHP_VERSION
+    # Nothing is pushed unless the image runs and serves in its documented modes
+    DOCKER_BUILD_TEST_SCRIPT: sh tests/smoke-test
+    # `latest` is a release tag here (release-image), not the last default branch build
+    DOCKER_BUILD_TAG_LATEST: 0
+    # Keep the Dockerfile's GitHub source label: it links the ghcr.io package to its repository
+    DOCKER_LABEL_SOURCE: ''
 
 # Analysis settings live in sonar-project.properties.
 sonar-qube-job:
   needs: [ ]
 
-# One scan per variant: Alpine and Debian ship different OS packages. The report is also kept under a
-# per-variant name for container-scanning-report (the paths are GitLab's container_scanning ones, plus it).
+# One scan per variant: Alpine and Debian ship different OS packages.
 container-scanning-job:
   extends: [ .container-scanning, .variants ]
-  variables:
-    JOB_CTSN_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA-$PHP_VERSION-$OS
-  after_script:
-    - cp gl-container-scanning-report.json "gl-container-scanning-report-$PHP_VERSION-$OS.json" || true
-  artifacts:
-    paths:
-      - gl-container-scanning-report.json
-      - gl-container-scanning-report-*.json
-      - gl-dependency-scanning-report.json
-      - "**/gl-sbom-*.cdx.json"
 
-# DefectDojo imports a single container scanning report (a second import would close the findings of the
-# first one), and the variants' reports share one file name: merge them into that file.
-container-scanning-report:
-  stage: test
-  image: python:3.13-alpine
-  variables:
-    GIT_STRATEGY: none
-  needs:
-    - job: container-scanning-job
-      artifacts: true
-  script:
-    - |
-      python3 - gl-container-scanning-report-*.json <<'EOF'
-      import json
-      import sys
-
-      merged = None
-      for path in sys.argv[1:]:
-          with open(path) as file:
-              report = json.load(file)
-          if merged is None:
-              merged = report
-          else:
-              merged["vulnerabilities"] += report.get("vulnerabilities", [])
-              merged["remediations"] = merged.get("remediations", []) + report.get("remediations", [])
-      with open("gl-container-scanning-report.json", "w") as file:
-          json.dump(merged, file)
-      print(f"{len(merged['vulnerabilities'])} vulnerabilities from {len(sys.argv) - 1} reports")
-      EOF
-  artifacts:
-    paths: [ gl-container-scanning-report.json ]
-  allow_failure: true
-  rules:
-    - if: $JOB_DOJO_ENABLED == "1" && $JOB_CTSN_ENABLED == "1"
-          && ($CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
-
-# The template's needs, with the merged container scanning report instead of the per-variant ones.
-defectdojo-report-job:
-  needs:
-    - job: semgrep-sast-job
-      optional: true
-    - job: kics-iac-sast-job
-      optional: true
-    - job: secret-detection-job
-      optional: true
-    - job: dependency-scanning-job
-      optional: true
-    - job: container-scanning-report
-      optional: true
-    - job: dast-job
-      optional: true
-
-# Publishes a release, on a git tag and on the monthly scheduled rebuild (set up via Build > Pipeline schedules,
-# cron `0 0 1 * *` on the default branch), whose version is derived from the date (e.g. v26-06-01; the rebuild
-# uses `--pull --no-cache`, so it picks up the base images' and OS packages' security fixes).
-# Each variant's verified commit image is retagged, not rebuilt: `:<php>-<os>-<release>` and `:<php>-<os>`,
-# plus `:<php>` for OS_LATEST and `:latest` for OS_LATEST + PHP_VERSION_LATEST, in the GitLab registry
-# and on ghcr.io (CI_GHCR_USER / CI_GHCR_TOKEN).
+# Releases each variant's verified commit image, without a rebuild, on a git tag and on the monthly rebuild:
+# `:<php>-<os>-<version>` and `:<php>-<os>`, plus the floating `:<php>` and `:latest`, in the GitLab registry
+# and on ghcr.io.
 release-image:
   stage: release
-  # Template job: crane image and no checkout (its script only adds one tag in one registry)
   extends: [ .docker-promote, .variants ]
-  interruptible: false
   variables:
-    GHCR_IMAGE: ghcr.io/infogene/nginx-php
-  needs:
-    # The scheduled rebuild releases the images it has just built; a tag pipeline builds none
-    - job: docker-build
-      artifacts: false
-      optional: true
-  script:
+    DOCKER_PROMOTE_MIRROR_IMAGE: ghcr.io/infogene/nginx-php
+    DOCKER_PROMOTE_MIRROR_USER: $CI_GHCR_USER
+    DOCKER_PROMOTE_MIRROR_PASSWORD: $CI_GHCR_TOKEN
+  before_script:
     - |
-      set -euf
-
-      variant="$PHP_VERSION-$OS"
-      source_image="$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA-$variant"
-      release_tag="$variant-${CI_COMMIT_TAG:-v$(date -u +%y-%m-%d)}"
-      floating_tags="$variant"
+      DOCKER_PROMOTE_TAGS="$PHP_VERSION-$OS-{version} $PHP_VERSION-$OS"
       if [ "$OS" = "$OS_LATEST" ]; then
-        floating_tags="$floating_tags $PHP_VERSION"
+        DOCKER_PROMOTE_TAGS="$DOCKER_PROMOTE_TAGS $PHP_VERSION"
         if [ "$PHP_VERSION" = "$PHP_VERSION_LATEST" ]; then
-          floating_tags="$floating_tags latest"
+          DOCKER_PROMOTE_TAGS="$DOCKER_PROMOTE_TAGS latest"
         fi
       fi
-
-      if [ -z "${CI_GHCR_USER:-}" ] || [ -z "${CI_GHCR_TOKEN:-}" ]; then
-        echo "ERROR: CI_GHCR_USER and CI_GHCR_TOKEN must be set to publish to ghcr.io" >&2
-        exit 1
-      fi
-      printf '%s' "$CI_REGISTRY_PASSWORD" | crane auth login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-      printf '%s' "$CI_GHCR_TOKEN" | crane auth login ghcr.io -u "$CI_GHCR_USER" --password-stdin
-
-      if ! digest="$(crane digest "$source_image")"; then
-        echo "ERROR: $source_image not found: the default branch pipeline of commit $CI_COMMIT_SHORT_SHA must build it first, then retry this job" >&2
-        exit 1
-      fi
-      echo "Release $source_image ($digest) as $release_tag $floating_tags"
-
-      for tag in $release_tag $floating_tags; do
-        crane tag "$source_image" "$tag"
-      done
-      # ghcr.io: one copy of the layers, then the other tags server-side
-      crane copy "$source_image" "$GHCR_IMAGE:$release_tag"
-      for tag in $floating_tags; do
-        crane tag "$GHCR_IMAGE:$release_tag" "$tag"
-      done
-  rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
